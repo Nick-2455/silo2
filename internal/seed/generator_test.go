@@ -281,6 +281,38 @@ func TestBuildFromObservation_PreservesProtectedFieldsAcrossProposals(t *testing
 	}
 }
 
+func TestBuildFromObservation_SourceMetadataDoesNotAffectSeedID(t *testing.T) {
+	obs := engram.Observation{
+		ID:      "obs-123",
+		Title:   "Observation title wins",
+		Content: "Captured content stays in Memory.",
+		Why:     "Because this matters to me.",
+	}
+	proposal := synthesis.Proposal{
+		ProposedSummary:  "AI summary",
+		SuggestedThemes:  []string{"theme-a"},
+		WhyItMightMatter: "AI reason",
+	}
+
+	withoutSource, err := BuildFromObservation(obs, proposal)
+	if err != nil {
+		t.Fatalf("BuildFromObservation without source: %v", err)
+	}
+	withSource, err := BuildFromObservation(obs, proposal)
+	if err != nil {
+		t.Fatalf("BuildFromObservation with source: %v", err)
+	}
+	withSource.SourceType = "article"
+	withSource.SourceURL = "https://example.com/post"
+
+	if withoutSource.ID != withSource.ID {
+		t.Fatalf("source metadata changed seed id: %q vs %q", withoutSource.ID, withSource.ID)
+	}
+	if strings.TrimSuffix(withoutSource.ID, ".md") != strings.TrimSuffix(withSource.ID, ".md") {
+		t.Fatalf("source metadata changed filename base: %q vs %q", withoutSource.ID, withSource.ID)
+	}
+}
+
 func TestBuildFromImport_PreservesStableIdentityAndLegacyPath(t *testing.T) {
 	obs := engram.Observation{
 		ID:      "obs-import-1",

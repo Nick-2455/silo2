@@ -34,6 +34,9 @@ type renderView struct {
 	UserWhy          string
 	HasLegacyPath    bool
 	LegacyPath       string
+	HasSourceRef     bool
+	SourceType       string
+	SourceURL        string
 }
 
 // Template is intentionally laid out exactly as it appears on disk.
@@ -63,6 +66,12 @@ source_observation: {{ .SourceCSV }}
 ## Source
 
 - Legacy path: {{ .LegacyPath }}
+
+{{ end }}
+{{ if .HasSourceRef }}
+## Sources
+
+- {{ .SourceType }}: {{ .SourceURL }}
 
 {{ end }}
 {{ if .HasUserWhy }}
@@ -98,6 +107,9 @@ func Render(s Seed) (string, error) {
 		UserWhy:          strings.TrimSpace(s.UserWhy),
 		HasLegacyPath:    strings.TrimSpace(s.LegacyPath) != "",
 		LegacyPath:       strings.TrimSpace(s.LegacyPath),
+		HasSourceRef:     strings.TrimSpace(s.SourceURL) != "",
+		SourceType:       strings.TrimSpace(s.SourceType),
+		SourceURL:        strings.TrimSpace(s.SourceURL),
 	}
 
 	tmpl, err := template.New("seed").Parse(seedTemplate)

@@ -87,9 +87,11 @@ type saveDeps struct {
 }
 
 type saveInput struct {
-	Project string
-	Text    string
-	Why     string
+	Project    string
+	Text       string
+	Why        string
+	SourceURL  string
+	SourceType string
 }
 
 type saveResult struct {
@@ -155,6 +157,8 @@ func saveCore(ctx context.Context, deps saveDeps, in saveInput) (saveResult, err
 		fmt.Fprintf(deps.Stderr, "warning: seed generation failed (%v); observation %s is safe\n", err, id)
 		return res, nil
 	}
+	s.SourceURL = strings.TrimSpace(in.SourceURL)
+	s.SourceType = strings.TrimSpace(in.SourceType)
 
 	md, err := seed.Render(s)
 	if err != nil {
@@ -193,13 +197,13 @@ func runSave(args []string) error {
 	//   silo save --why "..." "MVVM-C insight"
 	// Go's stdlib flag package stops at the first positional, which would
 	// otherwise swallow trailing flags into the text.
-	whyVal, projectVal, positional, err := parseSaveArgs(args)
+	whyVal, projectVal, sourceURL, sourceType, positional, err := parseSaveArgs(args)
 	if err != nil {
 		return err
 	}
 
 	if len(positional) == 0 {
-		return errors.New("silo save: missing input text\n\nUsage: silo save <text> [--why \"...\"] [--project <name>]")
+		return errors.New("silo save: missing input text\n\nUsage: silo save <text> [--why \"...\"] [--source \"https://...\"] [--source-type article|video|course|book|paper|link] [--project <name>]")
 	}
 	text := strings.Join(positional, " ")
 
@@ -222,9 +226,11 @@ func runSave(args []string) error {
 	}
 
 	_, err = saveCore(context.Background(), deps, saveInput{
-		Project: project,
-		Text:    text,
-		Why:     whyVal,
+		Project:    project,
+		Text:       text,
+		Why:        whyVal,
+		SourceURL:  sourceURL,
+		SourceType: sourceType,
 	})
 	return err
 }
@@ -253,14 +259,14 @@ func synthesizeWithFallback(ctx context.Context, synth synthesis.Synthesizer, sr
 //
 // Unknown long flags are rejected loudly so a typo like "--wy" does not
 // silently end up in the captured text.
-func parseSaveArgs(args []string) (why, project string, positional []string, err error) {
+func parseSaveArgs(args []string) (why, project, sourceURL, sourceType string, positional []string, err error) {
 	i := 0
 	for i < len(args) {
 		a := args[i]
 		switch {
 		case a == "--why":
 			if i+1 >= len(args) {
-				return "", "", nil, errors.New("--why requires a value")
+				return "", "", "", "", nil, errors.New("--why requires a value")
 			}
 			why = args[i+1]
 			i += 2
@@ -269,23 +275,76 @@ func parseSaveArgs(args []string) (why, project string, positional []string, err
 			i++
 		case a == "--project":
 			if i+1 >= len(args) {
-				return "", "", nil, errors.New("--project requires a value")
+				return "", "", "", "", nil, errors.New("--project requires a value")
 			}
 			project = args[i+1]
 			i += 2
 		case strings.HasPrefix(a, "--project="):
 			project = strings.TrimPrefix(a, "--project=")
 			i++
+		case a == "--source":
+			if i+1 >= len(args) {
+				return "", "", "", "", nil, errors.New("--source requires a value")
+			}
+			sourceURL = args[i+1]
+			i += 2
+		case strings.HasPrefix(a, "--source="):
+			sourceURL = strings.TrimPrefix(a, "--source=")
+			i++
+		case a == "--source-type":
+			if i+1 >= len(args) {
+				return "", "", "", "", nil, errors.New("--source-type requires a value")
+			}
+			sourceType = args[i+1]
+			i += 2
+		case strings.HasPrefix(a, "--source-type="):
+			sourceType = strings.TrimPrefix(a, "--source-type=")
+			i++
 		case a == "--":
 			// Treat everything after `--` as positional, no flag parsing.
 			positional = append(positional, args[i+1:]...)
 			i = len(args)
 		case strings.HasPrefix(a, "--"):
-			return "", "", nil, fmt.Errorf("unknown flag: %s", a)
+			return "", "", "", "", nil, fmt.Errorf("unknown flag: %s", a)
 		default:
 			positional = append(positional, a)
 			i++
 		}
 	}
-	return why, project, positional, nil
+
+	sourceURL, sourceType, err = normalizeSourceArgs(sourceURL, sourceType)
+	if err != nil {
+		return "", "", "", "", nil, err
+	}
+
+	return why, project, sourceURL, sourceType, positional, nil
+}
+
+var allowedSourceTypes = map[string]struct{}{
+	"article": {},
+	"video":   {},
+	"course":  {},
+	"book":    {},
+	"paper":   {},
+	"link":    {},
+}
+
+const allowedSourceTypesList = "article, video, course, book, paper, link"
+
+func normalizeSourceArgs(sourceURL, sourceType string) (string, string, error) {
+	sourceURL = strings.TrimSpace(sourceURL)
+	sourceType = strings.TrimSpace(sourceType)
+	if sourceURL == "" {
+		if sourceType != "" {
+			return "", "", errors.New("--source-type requires --source")
+		}
+		return "", "", nil
+	}
+	if sourceType == "" {
+		return sourceURL, "link", nil
+	}
+	if _, ok := allowedSourceTypes[sourceType]; !ok {
+		return "", "", fmt.Errorf("invalid source-type %q (allowed: %s)", sourceType, allowedSourceTypesList)
+	}
+	return sourceURL, sourceType, nil
 }

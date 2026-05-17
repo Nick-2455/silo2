@@ -116,6 +116,51 @@ func TestSaveCore_PassesWhyAsCaptureMetadata(t *testing.T) {
 	}
 }
 
+func TestSaveCore_DoesNotPassCallerOwnedSourceIntoSynthesis(t *testing.T) {
+	dir := t.TempDir()
+	client := engram.NewMockClient()
+	recorder := &recordingSynthesizer{proposal: synthesis.Proposal{
+		ProposedSummary:  "summary",
+		SuggestedThemes:  []string{"theme"},
+		WhyItMightMatter: "matter",
+	}}
+
+	_, err := saveCore(context.Background(), saveDeps{
+		Client: client,
+		Synth:  recorder,
+		Vault:  obsidian.NewVault(dir),
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+	}, saveInput{
+		Project:    "silo2",
+		Text:       "raw content here",
+		Why:        "Human why",
+		SourceURL:  "https://example.com/post",
+		SourceType: "article",
+	})
+	if err != nil {
+		t.Fatalf("saveCore: %v", err)
+	}
+	if recorder.recorded.ContextHint != "silo save observation" {
+		t.Fatalf("ContextHint = %q", recorder.recorded.ContextHint)
+	}
+	if recorder.recorded.Title != "" {
+		t.Fatalf("Title = %q, want empty", recorder.recorded.Title)
+	}
+	if recorder.recorded.Content != "raw content here" {
+		t.Fatalf("Content = %q", recorder.recorded.Content)
+	}
+	if strings.Contains(recorder.recorded.Content, "https://example.com/post") ||
+		strings.Contains(recorder.recorded.Content, "article") ||
+		strings.Contains(recorder.recorded.ContextHint, "https://example.com/post") ||
+		strings.Contains(recorder.recorded.ContextHint, "article") {
+		t.Fatalf("caller-owned source leaked into synthesis input: %+v", recorder.recorded)
+	}
+	if strings.Contains(recorder.recorded.Title, "https://example.com/post") || strings.Contains(recorder.recorded.Title, "article") {
+		t.Fatalf("caller-owned source leaked into synthesis title: %+v", recorder.recorded)
+	}
+}
+
 func TestSaveCore_RejectsEmptyInput(t *testing.T) {
 	_, err := saveCore(context.Background(), saveDeps{
 		Client: engram.NewMockClient(),
@@ -186,10 +231,97 @@ func TestSaveCore_SeedFailureDoesNotFailCapture(t *testing.T) {
 	}
 }
 
+func TestSaveCore_DoesNotOverwriteExistingSeedWhenSourceMetadataMatches(t *testing.T) {
+	dir := t.TempDir()
+	deps := saveDeps{
+		Client: fixedIDClient{id: "obs-fixed-1"},
+		Synth:  mockSynthesizer{proposal: synthesis.Proposal{ProposedSummary: "summary", SuggestedThemes: []string{"theme"}, WhyItMightMatter: "matter"}},
+		Vault:  obsidian.NewVault(dir),
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+	}
+	in := saveInput{
+		Project:    "silo2",
+		Text:       "same content",
+		Why:        "same why",
+		SourceURL:  "https://example.com/post",
+		SourceType: "article",
+	}
+
+	first, err := saveCore(context.Background(), deps, in)
+	if err != nil {
+		t.Fatalf("first saveCore: %v", err)
+	}
+	seedPath := filepath.Join(dir, first.SeedPath)
+	original := []byte("human edited seed")
+	if err := os.WriteFile(seedPath, original, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	second, err := saveCore(context.Background(), deps, in)
+	if err != nil {
+		t.Fatalf("second saveCore: %v", err)
+	}
+	if first.SeedPath != second.SeedPath {
+		t.Fatalf("seed path changed across identical save: %q vs %q", first.SeedPath, second.SeedPath)
+	}
+	body, err := os.ReadFile(seedPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(body) != string(original) {
+		t.Fatalf("existing seed was overwritten:\n%s", body)
+	}
+}
+
+func TestSaveCore_SourceMetadataDoesNotAffectSeedPath(t *testing.T) {
+	dir := t.TempDir()
+	deps := saveDeps{
+		Client: fixedIDClient{id: "obs-fixed-1"},
+		Synth:  mockSynthesizer{proposal: synthesis.Proposal{ProposedSummary: "summary", SuggestedThemes: []string{"theme"}, WhyItMightMatter: "matter"}},
+		Vault:  obsidian.NewVault(dir),
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+	}
+
+	base := saveInput{Project: "silo2", Text: "same content", Why: "same why"}
+	firstInput := base
+	firstInput.SourceURL = "https://example.com/article"
+	firstInput.SourceType = "article"
+	secondInput := base
+	secondInput.SourceURL = "https://example.com/video"
+	secondInput.SourceType = "video"
+
+	first, err := saveCore(context.Background(), deps, firstInput)
+	if err != nil {
+		t.Fatalf("first saveCore: %v", err)
+	}
+	seedPath := filepath.Join(dir, first.SeedPath)
+	original, err := os.ReadFile(seedPath)
+	if err != nil {
+		t.Fatalf("ReadFile first seed: %v", err)
+	}
+
+	second, err := saveCore(context.Background(), deps, secondInput)
+	if err != nil {
+		t.Fatalf("second saveCore: %v", err)
+	}
+	if first.SeedPath != second.SeedPath {
+		t.Fatalf("source metadata changed seed path: %q vs %q", first.SeedPath, second.SeedPath)
+	}
+	body, err := os.ReadFile(seedPath)
+	if err != nil {
+		t.Fatalf("ReadFile second seed: %v", err)
+	}
+	if string(body) != string(original) {
+		t.Fatalf("different source metadata overwrote existing seed:\n%s", body)
+	}
+}
+
 func TestParseSaveArgs_FlagAfterText(t *testing.T) {
 	// The natural CLI form is text first, flags after. Pin the parser
 	// so this never regresses to Go's default flag-then-positional rule.
-	why, project, pos, err := parseSaveArgs([]string{"MVVM-C navigation insight", "--why", "I keep forgetting"})
+	why, project, _, _, pos, err := parseSaveArgs([]string{"MVVM-C navigation insight", "--why", "I keep forgetting"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,8 +336,85 @@ func TestParseSaveArgs_FlagAfterText(t *testing.T) {
 	}
 }
 
+func TestParseSaveArgs_SourceFlags(t *testing.T) {
+	tests := []struct {
+		name           string
+		args           []string
+		wantWhy        string
+		wantProject    string
+		wantSourceURL  string
+		wantSourceType string
+		wantPositional []string
+	}{
+		{
+			name:           "source after text with default type",
+			args:           []string{"hello", "--source", "https://example.com/post"},
+			wantSourceURL:  "https://example.com/post",
+			wantSourceType: "link",
+			wantPositional: []string{"hello"},
+		},
+		{
+			name:           "source before text equals form",
+			args:           []string{"--source=https://example.com/post", "--source-type=article", "hello"},
+			wantSourceURL:  "https://example.com/post",
+			wantSourceType: "article",
+			wantPositional: []string{"hello"},
+		},
+		{
+			name:           "source mixed with why and project",
+			args:           []string{"--project", "x", "hello", "--why", "reason", "--source-type", "video", "--source", "https://example.com/watch"},
+			wantWhy:        "reason",
+			wantProject:    "x",
+			wantSourceURL:  "https://example.com/watch",
+			wantSourceType: "video",
+			wantPositional: []string{"hello"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			why, project, sourceURL, sourceType, pos, err := parseSaveArgs(tt.args)
+			if err != nil {
+				t.Fatalf("parseSaveArgs: %v", err)
+			}
+			if why != tt.wantWhy || project != tt.wantProject || sourceURL != tt.wantSourceURL || sourceType != tt.wantSourceType {
+				t.Fatalf("got why=%q project=%q sourceURL=%q sourceType=%q", why, project, sourceURL, sourceType)
+			}
+			if strings.Join(pos, "|") != strings.Join(tt.wantPositional, "|") {
+				t.Fatalf("positional = %v, want %v", pos, tt.wantPositional)
+			}
+		})
+	}
+}
+
+func TestParseSaveArgs_InvalidSourceTypeRejected(t *testing.T) {
+	_, _, _, _, _, err := parseSaveArgs([]string{"hello", "--source", "https://example.com/post", "--source-type", "podcast"})
+	if err == nil {
+		t.Fatal("expected invalid source-type error")
+	}
+	if !strings.Contains(err.Error(), "invalid source-type") {
+		t.Fatalf("error = %v", err)
+	}
+	if !strings.Contains(err.Error(), "podcast") {
+		t.Fatalf("error should mention invalid value, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "article") || !strings.Contains(err.Error(), "link") {
+		t.Fatalf("error should mention allowed values, got: %v", err)
+	}
+}
+
+func TestParseSaveArgs_SourceTypeRequiresSource(t *testing.T) {
+	_, _, _, _, _, err := parseSaveArgs([]string{"hello", "--source-type", "article"})
+	if err == nil {
+		t.Fatal("expected --source-type without --source to error")
+	}
+	if !strings.Contains(err.Error(), "--source-type requires --source") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestParseSaveArgs_FlagBeforeText(t *testing.T) {
-	why, _, pos, err := parseSaveArgs([]string{"--why", "reason", "hello"})
+	why, _, _, _, pos, err := parseSaveArgs([]string{"--why", "reason", "hello"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +424,7 @@ func TestParseSaveArgs_FlagBeforeText(t *testing.T) {
 }
 
 func TestParseSaveArgs_EqualsForm(t *testing.T) {
-	why, project, pos, err := parseSaveArgs([]string{"--why=reason", "--project=x", "text"})
+	why, project, _, _, pos, err := parseSaveArgs([]string{"--why=reason", "--project=x", "text"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,14 +434,14 @@ func TestParseSaveArgs_EqualsForm(t *testing.T) {
 }
 
 func TestParseSaveArgs_UnknownFlagRejected(t *testing.T) {
-	if _, _, _, err := parseSaveArgs([]string{"--wy", "typo", "text"}); err == nil {
+	if _, _, _, _, _, err := parseSaveArgs([]string{"--wy", "typo", "text"}); err == nil {
 		t.Error("expected error on unknown flag")
 	}
 }
 
 func TestParseSaveArgs_DoubleDashStopsParsing(t *testing.T) {
 	// Allow capturing literal text that starts with "--".
-	_, _, pos, err := parseSaveArgs([]string{"--", "--literal-text", "more"})
+	_, _, _, _, pos, err := parseSaveArgs([]string{"--", "--literal-text", "more"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,6 +607,16 @@ func (m mockSynthesizer) Synthesize(context.Context, synthesis.Source) (synthesi
 	return m.proposal, nil
 }
 
+type recordingSynthesizer struct {
+	recorded synthesis.Source
+	proposal synthesis.Proposal
+}
+
+func (r *recordingSynthesizer) Synthesize(_ context.Context, src synthesis.Source) (synthesis.Proposal, error) {
+	r.recorded = src
+	return r.proposal, nil
+}
+
 type errSynthesizer struct{ err error }
 
 func (e errSynthesizer) Synthesize(context.Context, synthesis.Source) (synthesis.Proposal, error) {
@@ -459,4 +678,18 @@ func (unsupportedClient) Context(_ context.Context, _ string) ([]engram.Observat
 }
 func (unsupportedClient) Save(_ context.Context, _ engram.Observation) (string, error) {
 	return "", engram.ErrSaveUnsupported
+}
+
+type fixedIDClient struct{ id string }
+
+func (c fixedIDClient) Search(context.Context, string) ([]engram.Observation, error) {
+	return nil, nil
+}
+
+func (c fixedIDClient) Context(context.Context, string) ([]engram.Observation, error) {
+	return nil, nil
+}
+
+func (c fixedIDClient) Save(_ context.Context, _ engram.Observation) (string, error) {
+	return c.id, nil
 }
