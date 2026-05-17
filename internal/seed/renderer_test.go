@@ -172,6 +172,26 @@ func TestRender_MultipleSourcesListed(t *testing.T) {
 	}
 }
 
+func TestRender_IncludesLegacySourceSectionWhenPresent(t *testing.T) {
+	s := Seed{
+		ID:                   "seed-1",
+		Title:                "T",
+		SourceObservationIDs: []string{"obs-1"},
+		SuggestedThemes:      []string{"unclassified"},
+		LegacyPath:           "wiki/a/note.md",
+	}
+	out, err := Render(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "## Source") {
+		t.Fatalf("missing Source section:\n%s", out)
+	}
+	if !strings.Contains(out, "Legacy path: wiki/a/note.md") {
+		t.Fatalf("missing legacy path line:\n%s", out)
+	}
+}
+
 func TestRender_ErrorsOnInvalidSeed(t *testing.T) {
 	if _, err := Render(Seed{}); err == nil {
 		t.Error("expected error on zero-value seed (missing ID and sources)")

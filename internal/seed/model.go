@@ -55,4 +55,9 @@ type Seed struct {
 	// time, or empty. This is the single most valuable human signal in
 	// the system; never edit it.
 	UserWhy string
+
+	// LegacyPath is a weak provenance signal for imports (e.g. a legacy
+	// Obsidian wiki relative path). It MUST NOT be treated as taxonomy.
+	// Rendered in the seed under "## Source" for human review.
+	LegacyPath string
 }

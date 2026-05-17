@@ -72,6 +72,12 @@ func main() {
 			os.Exit(1)
 		}
 		return
+	case "import-wiki":
+		if err := runImportWiki(rest); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", cmd)
 		printHelp(os.Stderr)
@@ -93,6 +99,7 @@ Commands:
   outputs  Seed professional outputs (CV / LinkedIn / Bio) under Outputs/
   save     Capture a text observation and propose a Seed under Inbox/open/
   inbox    List seed counts by status and open seed filenames
+  import-wiki  Import legacy wiki/*.md as Inbox/open seeds (experimental)
   help     Print this help
 
 Flags:
@@ -121,8 +128,9 @@ func runInit() error {
 
 // parseProjectFlag builds a per-subcommand flag set with --project. Each
 // subcommand owns its own flag set so users can write the natural form:
-//   silo sync --project silo2
-//   silo profile --project silo2
+//
+//	silo sync --project silo2
+//	silo profile --project silo2
 func parseProjectFlag(cmd string, args []string) (string, error) {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	projectFlag := fs.String("project", "", "Engram project (overrides config.project)")

@@ -22,16 +22,18 @@ import (
 // A reviewer scanning the file should never be in doubt about who wrote
 // any given line.
 type renderView struct {
-	ID                string
-	Title             string
-	SourceCSV         string   // for the frontmatter line
-	Sources           []string // for the body list
-	MultiSource       bool
-	ProposedSummary   string
-	SuggestedThemes   []string
-	WhyItMightMatter  string
-	HasUserWhy        bool
-	UserWhy           string
+	ID               string
+	Title            string
+	SourceCSV        string   // for the frontmatter line
+	Sources          []string // for the body list
+	MultiSource      bool
+	ProposedSummary  string
+	SuggestedThemes  []string
+	WhyItMightMatter string
+	HasUserWhy       bool
+	UserWhy          string
+	HasLegacyPath    bool
+	LegacyPath       string
 }
 
 // Template is intentionally laid out exactly as it appears on disk.
@@ -57,6 +59,12 @@ source_observation: {{ .SourceCSV }}
 ## Why It Might Matter
 
 {{ .WhyItMightMatter }}
+{{ if .HasLegacyPath }}
+## Source
+
+- Legacy path: {{ .LegacyPath }}
+
+{{ end }}
 {{ if .HasUserWhy }}
 ## Capture Why
 
@@ -88,6 +96,8 @@ func Render(s Seed) (string, error) {
 		WhyItMightMatter: fallback(s.WhyItMightMatter, "(no contextualization)"),
 		HasUserWhy:       strings.TrimSpace(s.UserWhy) != "",
 		UserWhy:          strings.TrimSpace(s.UserWhy),
+		HasLegacyPath:    strings.TrimSpace(s.LegacyPath) != "",
+		LegacyPath:       strings.TrimSpace(s.LegacyPath),
 	}
 
 	tmpl, err := template.New("seed").Parse(seedTemplate)
