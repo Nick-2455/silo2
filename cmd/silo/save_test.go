@@ -51,6 +51,9 @@ func TestSaveCore_WritesObservationAndSeed(t *testing.T) {
 	if len(matches) != 1 {
 		t.Fatalf("expected exactly 1 seed file under Inbox/open/, got %d (%v)", len(matches), matches)
 	}
+	if st, err := os.Stat(filepath.Join(dir, "Inbox/archive")); err != nil || !st.IsDir() {
+		t.Fatalf("expected Inbox/archive directory to exist, stat=%v err=%v", st, err)
+	}
 
 	body, _ := os.ReadFile(matches[0])
 	bodyStr := string(body)

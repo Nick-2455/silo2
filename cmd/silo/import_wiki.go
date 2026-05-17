@@ -231,6 +231,9 @@ func importWikiCore(ctx context.Context, deps importWikiDeps, in importWikiInput
 	if err := deps.Vault.EnsureDir(); err != nil {
 		return importWikiResult{}, err
 	}
+	if err := ensureInboxLayout(deps.Vault); err != nil {
+		return importWikiResult{}, err
+	}
 	// Ensure Inbox/README.md exists (same as save).
 	if _, err := deps.Vault.WriteNoteIfAbsent("Inbox", "README.md", inboxReadme); err != nil {
 		// Non-fatal; seeds are still the main output.

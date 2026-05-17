@@ -49,6 +49,9 @@ func TestImportWiki_IgnoresReadmeByDefault(t *testing.T) {
 	if len(matches) != 1 {
 		t.Fatalf("expected 1 seed, got %d (%v)", len(matches), matches)
 	}
+	if st, err := os.Stat(filepath.Join(vaultDir, "Inbox/archive")); err != nil || !st.IsDir() {
+		t.Fatalf("expected Inbox/archive directory to exist, stat=%v err=%v", st, err)
+	}
 }
 
 func TestImportWiki_IncludeReadmeWorks(t *testing.T) {
