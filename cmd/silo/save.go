@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -172,6 +173,10 @@ func saveCore(ctx context.Context, deps saveDeps, in saveInput) (saveResult, err
 		fmt.Fprintf(deps.Stderr, "warning: vault setup failed (%v); observation %s is safe\n", err, id)
 		return res, nil
 	}
+	if err := ensureInboxLayout(deps.Vault); err != nil {
+		fmt.Fprintf(deps.Stderr, "warning: inbox setup failed (%v); observation %s is safe\n", err, id)
+		return res, nil
+	}
 	// Seed a README under Inbox/ on first save so the directory is
 	// discoverable in Obsidian and the human knows what lives here.
 	// WriteNoteIfAbsent protects any human edits to this file.
@@ -187,6 +192,21 @@ func saveCore(ctx context.Context, deps saveDeps, in saveInput) (saveResult, err
 	res.SeedPath = rel
 	fmt.Fprintf(deps.Stdout, "%s/%s\n", deps.Vault.Path, rel)
 	return res, nil
+}
+
+func ensureInboxLayout(v *obsidian.Vault) error {
+	if v == nil {
+		return errors.New("vault is nil")
+	}
+	if strings.TrimSpace(v.Path) == "" {
+		return errors.New("vault path is empty")
+	}
+	for _, subdir := range []string{"Inbox/open", "Inbox/archive"} {
+		if err := os.MkdirAll(filepath.Join(v.Path, filepath.FromSlash(subdir)), 0o755); err != nil {
+			return fmt.Errorf("create %s: %w", subdir, err)
+		}
+	}
+	return nil
 }
 
 // runSave is the CLI entry point invoked by main.go.
