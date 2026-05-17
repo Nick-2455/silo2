@@ -4,8 +4,8 @@
   "engram_endpoint": "http://127.0.0.1:7437",
   "engram_api_key": "",
   "identity_name": "Nicolas Peralta",
-  "llm_provider": "",
-  "llm_model": "",
+  "llm_provider": "opencode",
+  "llm_model": "anthropic/claude-haiku-4-5",
   "llm_api_key": "",
-  "llm_timeout_seconds": 5
+  "llm_timeout_seconds": 30
 }
