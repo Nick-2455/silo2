@@ -164,6 +164,53 @@ skipped  ./vault/Outputs/CV.md (already exists)
 
 To regenerate one output seed, delete that file and run `silo outputs` again.
 
+## Capture and triage a Seed (W1 + W2)
+
+The capture loop is independent of `sync`/`curate`/`profile`/`outputs`. You can use it on its own.
+
+```bash
+go run ./cmd/silo save "MVVM-C navigation insight" --why "I keep forgetting this pattern"
+go run ./cmd/silo inbox
+```
+
+Expected output:
+
+```text
+Saved. Seed pending.
+./vault/Inbox/open/seed-233e177f.md
+```
+
+```text
+Inbox: ./vault/Inbox
+
+open       1
+deferred   0
+discarded  0
+approved   0
+
+Open seeds:
+  seed-233e177f.md
+```
+
+Open the seed in Obsidian. You will see four sections:
+
+- **Proposed Summary** — AI-authored. Tentative, regenerable.
+- **Suggested Themes** — AI-authored. Weak signals only (`unclassified` for now).
+- **Why It Might Matter** — AI-authored. A prompt for reflection, not a verdict.
+- **Capture Why** — appears only when `--why` was provided. Verbatim human text, attributed.
+- **Human Notes** — your turn. Edit freely.
+
+To triage:
+
+- **Defer**: change `status: open` to `status: deferred` in the frontmatter.
+- **Discard**: change to `status: discarded`.
+- **Done thinking**: move the file into `vault/Inbox/archive/`.
+- **Promote**: copy what matters into a real `vault/Curated/...` note by hand. (No automatic promotion — that is the editorial gate.)
+
+Re-running `silo save` with the same text is idempotent: the seed ID is deterministic and `WriteNoteIfAbsent` will not overwrite your edits.
+
+> Caveat: in mock mode (no `engram_endpoint` configured), the Memory layer is per-process, so the observations themselves do not persist between invocations. The seed files on disk do persist. This is enough to validate the human triage loop; full Memory persistence lands when `silo save` is wired to `POST /observations` on the real Engram backend.
+
 ## Common smoke test
 
 ```bash
@@ -175,5 +222,7 @@ go run ./cmd/silo sync
 go run ./cmd/silo curate
 go run ./cmd/silo profile
 go run ./cmd/silo outputs
+go run ./cmd/silo save "smoke-test capture" --why "checking the inbox loop"
+go run ./cmd/silo inbox
 find vault -type f | sort
 ```

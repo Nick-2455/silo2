@@ -8,7 +8,16 @@ Core pipeline:
 Engram → Raw → Curated → Profile → Outputs
 ```
 
+Plus a parallel **capture → seed → triage** loop:
+
+```text
+silo save → Engram (Memory) → AI seed proposal → Inbox/open/ → human triage
+```
+
 Engram remains the source of truth. Silo creates deterministic Markdown projections so humans can read, curate, and reuse that knowledge without introducing another database.
+
+Philosophy: **Memory is sacred. Synthesis is cheap. Identity is earned.**
+The seed inbox is the synthesis layer's editorial gate: AI proposes, the human disposes. Nothing flows up to Curated without human approval.
 
 ## What Silo is
 
@@ -158,6 +167,50 @@ go run ./cmd/silo outputs
 
 Existing files under `vault/Outputs/` are **never overwritten**.
 
+### `silo save`
+
+Captures a text observation and proposes a Seed under `vault/Inbox/open/`.
+
+```bash
+go run ./cmd/silo save "MVVM-C navigation insight"
+go run ./cmd/silo save "MVVM-C navigation insight" --why "I keep forgetting this pattern"
+```
+
+What happens:
+
+1. **Synchronous**: the observation is persisted to Memory (the configured Engram backend) and the CLI prints `Saved. Seed pending.` immediately.
+2. **Best-effort**: a deterministic mock Seed is generated and written to `vault/Inbox/open/seed-<id>.md`. If seed generation fails for any reason, the observation is still safe and a warning is printed to stderr — capture never blocks on AI.
+
+Flag order is flexible: `--why` and `--project` may appear before or after the text.
+
+**Capture metadata vs content**: `--why` is stored as `Observation.Why` (capture metadata), never merged into the observation content. The seed renders it under a dedicated `## Capture Why` section attributed to the human, separate from any AI-authored sections.
+
+### `silo inbox`
+
+Lists seed counts by status and the filenames currently in `vault/Inbox/open/`.
+
+```bash
+go run ./cmd/silo inbox
+```
+
+Example output:
+
+```text
+Inbox: ./vault/Inbox
+
+open       3
+deferred   1
+discarded  0
+approved   2
+
+Open seeds:
+  seed-1f2a4b8c.md
+  seed-233e177f.md
+  seed-a91d33e0.md
+```
+
+Status lives in each seed's frontmatter (`status: open | deferred | discarded | approved`). To triage a seed, open it in Obsidian and edit the field, or move the file to `vault/Inbox/archive/` once you are done thinking about it. Promotion to `Curated/` is also a human act — the system never moves seeds for you.
+
 ## Configuration
 
 Config file: `./silo.config.json`
@@ -258,6 +311,10 @@ vault/
 │   ├── Projects/
 │   ├── Identity/
 │   └── Career/
+├── Inbox/
+│   ├── open/                      # fresh seeds awaiting human triage
+│   │   └── seed-<id>.md
+│   └── archive/                   # seeds the human is done with
 ├── Outputs/
 │   ├── CV.md
 │   ├── LinkedIn.md
@@ -292,10 +349,12 @@ Expected behavior:
 
 ## Current limitations
 
-- No LLM generation yet. All output is deterministic template rendering.
+- No LLM generation yet. All output is deterministic template rendering. The seed generator is an intentionally weak mock (themes are always `["unclassified"]`) so the system does not accidentally learn its creator's categories.
+- `silo save` works against both the mock backend and the real Engram HTTP backend. With Engram, each capture upserts a long-lived `silo-save-{project}` session and POSTs the observation. Engram v1.15.13 has no `why` column in its schema and silently drops the field; Silo forwards it in the payload anyway for forward-compatibility, and the durable record of `--why` lives in the seed file's `## Capture Why` section.
+- In mock mode (no `engram_endpoint`), the Memory layer is in-memory per-process: each `silo save` invocation starts a fresh mock store. Seeds persist on disk. Useful for offline iteration on the triage loop.
 - No SQLite or local database.
 - No embeddings or semantic search.
-- No TUI.
+- No TUI for the inbox yet; triage happens by editing seed frontmatter or moving files in Obsidian.
 - No cloud sync.
 - No multi-user support.
 - No orphan sweep/delete yet; Silo does not remove files when Engram observations disappear.

@@ -60,6 +60,18 @@ func main() {
 			os.Exit(1)
 		}
 		return
+	case "save":
+		if err := runSave(rest); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
+	case "inbox":
+		if err := runInbox(rest); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", cmd)
 		printHelp(os.Stderr)
@@ -79,6 +91,8 @@ Commands:
   profile  Generate identity Markdown notes into the configured vault
   curate   Seed human-editable notes under Curated/ (never overwrites)
   outputs  Seed professional outputs (CV / LinkedIn / Bio) under Outputs/
+  save     Capture a text observation and propose a Seed under Inbox/open/
+  inbox    List seed counts by status and open seed filenames
   help     Print this help
 
 Flags:

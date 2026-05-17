@@ -2,8 +2,11 @@ package engram
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nicolasperalta/silo2/internal/config"
@@ -16,7 +19,22 @@ import (
 type Client interface {
 	Search(ctx context.Context, query string) ([]Observation, error)
 	Context(ctx context.Context, project string) ([]Observation, error)
+
+	// Save persists an observation and returns the resulting Engram ID.
+	// Memory layer contract: Save is the ONLY write path. Observations
+	// are append-only; nothing in this codebase ever mutates or deletes
+	// a saved observation.
+	//
+	// Implementations may reject the call (e.g. HTTP backend during the
+	// MVP) by returning ErrSaveUnsupported, in which case the caller is
+	// expected to surface a friendly hint rather than crashing.
+	Save(ctx context.Context, obs Observation) (string, error)
 }
+
+// ErrSaveUnsupported is the sentinel returned by backends that do not yet
+// implement Save. Callers may use errors.Is to detect it and offer a
+// targeted message instead of a generic failure.
+var ErrSaveUnsupported = errors.New("engram backend does not support Save")
 
 // NewClient is the only construction path. It routes to MockClient when no
 // endpoint is configured, otherwise returns a real HTTPClient.
@@ -29,8 +47,14 @@ func NewClient(cfg *config.Config) Client {
 
 // MockClient returns hardcoded observations. Used when engram_endpoint is
 // empty, so the MVP flow works fully offline.
+//
+// Save appends to the in-memory slice with a generated ID. The mutex
+// keeps concurrent saves safe even though the CLI is single-threaded —
+// tests sometimes drive the mock from goroutines.
 type MockClient struct {
+	mu           sync.Mutex
 	observations []Observation
+	saveCount    int
 }
 
 func NewMockClient() *MockClient {
@@ -137,6 +161,25 @@ func (m *MockClient) Context(_ context.Context, project string) ([]Observation, 
 	}
 	return out, nil
 }
+
+// Save appends an observation to the in-memory store and returns a
+// generated mock ID ("obs-mock-N"). The provided obs.ID is ignored — the
+// store assigns IDs to keep the Memory layer's "Engram owns identity"
+// rule in place even for the mock backend.
+func (m *MockClient) Save(_ context.Context, obs Observation) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.saveCount++
+	obs.ID = fmt.Sprintf("obs-mock-%d", m.saveCount)
+	if obs.CreatedAt.IsZero() {
+		obs.CreatedAt = time.Now().UTC()
+	}
+	m.observations = append(m.observations, obs)
+	return obs.ID, nil
+}
+
+// HTTPClient.Save lives in http_save.go; this file owns the interface
+// and the in-process mock backend only.
 
 // Compile-time guarantee that *http.Client satisfies the standard library
 // http Doer-like usage we rely on in http_client.go. Kept here as a tiny
