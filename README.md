@@ -253,7 +253,7 @@ Fields:
 - `engram_endpoint`: Engram HTTP endpoint. If empty, Silo uses the built-in mock client.
 - `engram_api_key`: optional bearer token for Engram HTTP requests.
 - `identity_name`: optional override for the generated identity name.
-- `llm_provider`: optional AI provider. Empty disables AI and uses deterministic fallback. Current supported value: `openai`.
+- `llm_provider`: optional AI provider. Empty disables AI and uses deterministic fallback. Current supported values: `openai`, `opencode`.
 - `llm_model`: optional provider model override. Empty uses the provider default.
 - `llm_api_key`: optional provider API key. If missing for a configured provider, Silo falls back deterministically.
 - `llm_timeout_seconds`: optional synthesis timeout in seconds. Defaults to 5. Use higher values (e.g. 30) for slow providers that involve subprocesses.
@@ -277,6 +277,12 @@ Fallback rules:
 - Missing key: deterministic fallback.
 - Timeout, rate limit, provider outage, or bad JSON: deterministic fallback.
 - No AI failure is allowed to break `silo save` or `silo import-wiki` after Memory persistence succeeds.
+
+### Optional: OpenCode synthesis provider (experimental)
+
+Silo can delegate proposal synthesis to a locally installed OpenCode CLI, which manages provider auth itself. Set `"llm_provider": "opencode"` and `"llm_model": "anthropic/claude-haiku-4-5"` in `silo.config.json`.
+
+Requirements: `opencode` binary on PATH and at least one provider authenticated via `opencode providers login`. On any failure (missing binary, no auth, bad response), Silo falls back to deterministic proposal text.
 
 Project precedence:
 
@@ -394,7 +400,7 @@ Expected behavior:
 
 ## Current limitations
 
-- No LLM generation yet. All output is deterministic template rendering. The seed generator is an intentionally weak mock (themes are always `["unclassified"]`) so the system does not accidentally learn its creator's categories.
+- LLM generation is optional and proposal-only; deterministic fallback remains the default safety path.
 - `silo save` works against both the mock backend and the real Engram HTTP backend. With Engram, each capture upserts a long-lived `silo-save-{project}` session and POSTs the observation. Engram v1.15.13 has no `why` column in its schema and silently drops the field; Silo forwards it in the payload anyway for forward-compatibility, and the durable record of `--why` lives in the seed file's `## Capture Why` section.
 - In mock mode (no `engram_endpoint`), the Memory layer is in-memory per-process: each `silo save` invocation starts a fresh mock store. Seeds persist on disk. Useful for offline iteration on the triage loop.
 - No SQLite or local database.

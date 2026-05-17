@@ -11,6 +11,11 @@ func NewConfigured(providerName, model, apiKey string) Synthesizer {
 			return NewFallback()
 		}
 		return New(NewOpenAIProvider(apiKey, nil), model)
+	case "opencode":
+		if strings.TrimSpace(model) == "" {
+			return NewFallback()
+		}
+		return New(NewOpenCodeProvider(), model)
 	default:
 		return NewFallback()
 	}
