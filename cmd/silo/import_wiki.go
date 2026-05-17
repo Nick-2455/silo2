@@ -34,10 +34,11 @@ import (
 //   - Imports wiki/ only (raw/ is out of scope).
 
 type importWikiDeps struct {
-	Client engram.Client
-	Synth  synthesis.Synthesizer
-	Vault  *obsidian.Vault
-	Stdout io.Writer
+	Client  engram.Client
+	Synth   synthesis.Synthesizer
+	Vault   *obsidian.Vault
+	Timeout time.Duration
+	Stdout  io.Writer
 }
 
 type importWikiInput struct {
@@ -80,10 +81,11 @@ func runImportWiki(args []string) error {
 	project := resolveProject(projectVal, cfg.Project)
 
 	deps := importWikiDeps{
-		Client: engram.NewClient(cfg),
-		Synth:  synthesis.NewConfigured(cfg.LLMProvider, cfg.LLMModel, cfg.LLMAPIKey),
-		Vault:  obsidian.NewVault(cfg.VaultPath),
-		Stdout: os.Stdout,
+		Client:  engram.NewClient(cfg),
+		Synth:   synthesis.NewConfigured(cfg.LLMProvider, cfg.LLMModel, cfg.LLMAPIKey),
+		Vault:   obsidian.NewVault(cfg.VaultPath),
+		Timeout: cfg.SynthesisTimeout(),
+		Stdout:  os.Stdout,
 	}
 	_, err = importWikiCore(context.Background(), deps, importWikiInput{
 		Project:       project,
@@ -274,7 +276,7 @@ func importWikiCore(ctx context.Context, deps importWikiDeps, in importWikiInput
 			Content:     obs.Content,
 			ContextHint: "silo import-wiki observation",
 		}
-		proposal, _ := synthesizeWithFallback(ctx, deps.Synth, src)
+		proposal, _ := synthesizeWithFallback(ctx, deps.Synth, src, deps.Timeout)
 
 		s, err := seed.BuildFromImport(obs, rel, content, proposal)
 		if err != nil {

@@ -6,5 +6,6 @@
   "identity_name": "Nicolas Peralta",
   "llm_provider": "",
   "llm_model": "",
-  "llm_api_key": ""
+  "llm_api_key": "",
+  "llm_timeout_seconds": 5
 }
