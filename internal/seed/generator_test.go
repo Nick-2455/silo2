@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nicolasperalta/silo2/internal/engram"
+	"github.com/nicolasperalta/silo2/internal/synthesis"
 )
 
 // The Seed primitive is the AI-generated synthesis proposal. These tests
@@ -217,5 +218,136 @@ func TestMockGenerator_LinksSourceObservation(t *testing.T) {
 	}
 	if len(s.SourceObservationIDs) != 1 || s.SourceObservationIDs[0] != "obs-42" {
 		t.Errorf("source observation not linked: %v", s.SourceObservationIDs)
+	}
+}
+
+func TestBuildFromObservation_PreservesProtectedFieldsAcrossProposals(t *testing.T) {
+	obs := engram.Observation{
+		ID:      "obs-123",
+		Title:   "Observation title wins",
+		Content: "Captured content stays in Memory.",
+		Why:     "Because this matters to me.",
+	}
+
+	tests := []struct {
+		name     string
+		proposal synthesis.Proposal
+	}{
+		{
+			name: "plain proposal",
+			proposal: synthesis.Proposal{
+				ProposedSummary:  "AI summary A",
+				SuggestedThemes:  []string{"theme-a"},
+				WhyItMightMatter: "AI reason A",
+			},
+		},
+		{
+			name: "different proposal still keeps identity",
+			proposal: synthesis.Proposal{
+				ProposedSummary:  "AI summary B",
+				SuggestedThemes:  []string{"theme-b", "theme-c"},
+				WhyItMightMatter: "AI reason B",
+			},
+		},
+	}
+
+	var previousID string
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := BuildFromObservation(obs, tt.proposal)
+			if err != nil {
+				t.Fatalf("BuildFromObservation: %v", err)
+			}
+			if got.Title != obs.Title {
+				t.Fatalf("title = %q, want %q", got.Title, obs.Title)
+			}
+			if got.UserWhy != obs.Why {
+				t.Fatalf("user why = %q, want %q", got.UserWhy, obs.Why)
+			}
+			if len(got.SourceObservationIDs) != 1 || got.SourceObservationIDs[0] != obs.ID {
+				t.Fatalf("source ids = %v, want [%s]", got.SourceObservationIDs, obs.ID)
+			}
+			if got.LegacyPath != "" {
+				t.Fatalf("legacy path = %q, want empty", got.LegacyPath)
+			}
+			if got.ProposedSummary != tt.proposal.ProposedSummary || got.WhyItMightMatter != tt.proposal.WhyItMightMatter {
+				t.Fatalf("proposal fields were not mapped verbatim: %+v", got)
+			}
+			if previousID != "" && got.ID != previousID {
+				t.Fatalf("id drifted across proposals: %q vs %q", got.ID, previousID)
+			}
+			previousID = got.ID
+		})
+	}
+}
+
+func TestBuildFromImport_PreservesStableIdentityAndLegacyPath(t *testing.T) {
+	obs := engram.Observation{
+		ID:      "obs-import-1",
+		Title:   "Imported title",
+		Content: "# Imported title\n\nBody",
+	}
+	relPath := "wiki/a/note.md"
+	content := "# Imported title\n\nBody"
+
+	tests := []struct {
+		name     string
+		proposal synthesis.Proposal
+	}{
+		{
+			name: "proposal a",
+			proposal: synthesis.Proposal{
+				ProposedSummary:  "Summary A",
+				SuggestedThemes:  []string{"one"},
+				WhyItMightMatter: "Why A",
+			},
+		},
+		{
+			name: "proposal b keeps filename inputs stable",
+			proposal: synthesis.Proposal{
+				ProposedSummary:  "Summary B",
+				SuggestedThemes:  []string{"two"},
+				WhyItMightMatter: "Why B",
+			},
+		},
+	}
+
+	var previousID string
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := BuildFromImport(obs, relPath, content, tt.proposal)
+			if err != nil {
+				t.Fatalf("BuildFromImport: %v", err)
+			}
+			if got.Title != obs.Title {
+				t.Fatalf("title = %q, want %q", got.Title, obs.Title)
+			}
+			if got.LegacyPath != relPath {
+				t.Fatalf("legacy path = %q, want %q", got.LegacyPath, relPath)
+			}
+			if len(got.SourceObservationIDs) != 1 || got.SourceObservationIDs[0] != obs.ID {
+				t.Fatalf("source ids = %v, want [%s]", got.SourceObservationIDs, obs.ID)
+			}
+			if previousID != "" && got.ID != previousID {
+				t.Fatalf("id drifted across proposals: %q vs %q", got.ID, previousID)
+			}
+			previousID = got.ID
+		})
+	}
+
+	changedPath, err := BuildFromImport(obs, "wiki/b/note.md", content, tests[0].proposal)
+	if err != nil {
+		t.Fatalf("BuildFromImport changed path: %v", err)
+	}
+	if changedPath.ID == previousID {
+		t.Fatalf("expected different id when relPath changes, got %q", changedPath.ID)
+	}
+
+	changedContent, err := BuildFromImport(obs, relPath, content+"\nextra", tests[0].proposal)
+	if err != nil {
+		t.Fatalf("BuildFromImport changed content: %v", err)
+	}
+	if changedContent.ID == previousID {
+		t.Fatalf("expected different id when content changes, got %q", changedContent.ID)
 	}
 }

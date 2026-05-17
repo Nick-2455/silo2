@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/nicolasperalta/silo2/internal/engram"
+	"github.com/nicolasperalta/silo2/internal/synthesis"
 )
 
 // Generator turns an observation into a synthesis proposal.
@@ -68,6 +69,32 @@ func (g *MockGenerator) Generate(obs engram.Observation) (Seed, error) {
 		WhyItMightMatter:     mockWhyItMightMatter,
 		UserWhy:              obs.Why, // verbatim, never modified
 	}, nil
+}
+
+func BuildFromObservation(obs engram.Observation, proposal synthesis.Proposal) (Seed, error) {
+	if strings.TrimSpace(obs.ID) == "" {
+		return Seed{}, errors.New("observation ID is empty")
+	}
+
+	return Seed{
+		ID:                   seedID([]engram.Observation{obs}),
+		Title:                mockTitle(obs),
+		SourceObservationIDs: []string{obs.ID},
+		ProposedSummary:      proposal.ProposedSummary,
+		SuggestedThemes:      append([]string(nil), proposal.SuggestedThemes...),
+		WhyItMightMatter:     proposal.WhyItMightMatter,
+		UserWhy:              obs.Why,
+	}, nil
+}
+
+func BuildFromImport(obs engram.Observation, relPath string, content string, proposal synthesis.Proposal) (Seed, error) {
+	s, err := BuildFromObservation(obs, proposal)
+	if err != nil {
+		return Seed{}, err
+	}
+	s.ID = importSeedID(relPath, content)
+	s.LegacyPath = strings.TrimSpace(relPath)
+	return s, nil
 }
 
 // seedID derives a stable seed identifier from the observations the seed
@@ -142,4 +169,13 @@ func mockSummary(obs engram.Observation) string {
 		return body
 	}
 	return strings.TrimRight(string(runes[:mockSummaryMax]), " \t\n") + " […]"
+}
+
+func importSeedID(relPath string, content string) string {
+	h := sha256.New()
+	_, _ = h.Write([]byte(strings.TrimSpace(relPath)))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(content))
+	sum := h.Sum(nil)
+	return "seed-" + hex.EncodeToString(sum[:4])
 }
