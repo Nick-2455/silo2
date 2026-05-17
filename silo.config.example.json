@@ -3,5 +3,8 @@
   "project": "silo2",
   "engram_endpoint": "http://127.0.0.1:7437",
   "engram_api_key": "",
-  "identity_name": "Nicolas Peralta"
+  "identity_name": "Nicolas Peralta",
+  "llm_provider": "",
+  "llm_model": "",
+  "llm_api_key": ""
 }
