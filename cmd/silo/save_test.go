@@ -11,6 +11,7 @@ import (
 	"github.com/nicolasperalta/silo2/internal/engram"
 	"github.com/nicolasperalta/silo2/internal/obsidian"
 	"github.com/nicolasperalta/silo2/internal/seed"
+	"github.com/nicolasperalta/silo2/internal/synthesis"
 )
 
 // `silo save` end-to-end behavior. We drive the core function with an
@@ -25,11 +26,11 @@ func TestSaveCore_WritesObservationAndSeed(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	res, err := saveCore(context.Background(), saveDeps{
-		Client:    client,
-		Generator: gen,
-		Vault:     v,
-		Stdout:    &stdout,
-		Stderr:    &stderr,
+		Client: client,
+		Synth:  mockSynthesizerFromSeed(t, gen),
+		Vault:  v,
+		Stdout: &stdout,
+		Stderr: &stderr,
 	}, saveInput{
 		Project: "silo2",
 		Text:    "MVVM-C navigation insight",
@@ -79,7 +80,7 @@ func TestSaveCore_PassesWhyAsCaptureMetadata(t *testing.T) {
 	gen := seed.NewMockGenerator()
 
 	_, err := saveCore(context.Background(), saveDeps{
-		Client: client, Generator: gen, Vault: v,
+		Client: client, Synth: mockSynthesizerFromSeed(t, gen), Vault: v,
 		Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{},
 	}, saveInput{
 		Project: "silo2",
@@ -115,10 +116,10 @@ func TestSaveCore_PassesWhyAsCaptureMetadata(t *testing.T) {
 
 func TestSaveCore_RejectsEmptyInput(t *testing.T) {
 	_, err := saveCore(context.Background(), saveDeps{
-		Client:    engram.NewMockClient(),
-		Generator: seed.NewMockGenerator(),
-		Vault:     obsidian.NewVault(t.TempDir()),
-		Stdout:    &bytes.Buffer{}, Stderr: &bytes.Buffer{},
+		Client: engram.NewMockClient(),
+		Synth:  mockSynthesizerFromSeed(t, seed.NewMockGenerator()),
+		Vault:  obsidian.NewVault(t.TempDir()),
+		Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{},
 	}, saveInput{Project: "silo2", Text: "   "})
 	if err == nil {
 		t.Error("expected error on empty/whitespace input")
@@ -132,10 +133,10 @@ func TestSaveCore_PrintsSavedBeforeSeedPath(t *testing.T) {
 	dir := t.TempDir()
 	var stdout bytes.Buffer
 	_, err := saveCore(context.Background(), saveDeps{
-		Client:    engram.NewMockClient(),
-		Generator: seed.NewMockGenerator(),
-		Vault:     obsidian.NewVault(dir),
-		Stdout:    &stdout, Stderr: &bytes.Buffer{},
+		Client: engram.NewMockClient(),
+		Synth:  mockSynthesizerFromSeed(t, seed.NewMockGenerator()),
+		Vault:  obsidian.NewVault(dir),
+		Stdout: &stdout, Stderr: &bytes.Buffer{},
 	}, saveInput{Project: "silo2", Text: "hello"})
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +169,7 @@ func TestSaveCore_SeedFailureDoesNotFailCapture(t *testing.T) {
 
 	var stderr bytes.Buffer
 	res, err := saveCore(context.Background(), saveDeps{
-		Client: client, Generator: seed.NewMockGenerator(), Vault: v,
+		Client: client, Synth: mockSynthesizerFromSeed(t, seed.NewMockGenerator()), Vault: v,
 		Stdout: &bytes.Buffer{}, Stderr: &stderr,
 	}, saveInput{Project: "silo2", Text: "hello"})
 
@@ -247,11 +248,11 @@ func TestSaveCore_UnsupportedBackendIsFriendly(t *testing.T) {
 	v := obsidian.NewVault(dir)
 
 	_, err := saveCore(context.Background(), saveDeps{
-		Client:    unsupportedClient{},
-		Generator: seed.NewMockGenerator(),
-		Vault:     v,
-		Stdout:    &bytes.Buffer{},
-		Stderr:    &bytes.Buffer{},
+		Client: unsupportedClient{},
+		Synth:  mockSynthesizerFromSeed(t, seed.NewMockGenerator()),
+		Vault:  v,
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
 	}, saveInput{Project: "silo2", Text: "hello"})
 
 	if err == nil {
@@ -260,6 +261,86 @@ func TestSaveCore_UnsupportedBackendIsFriendly(t *testing.T) {
 	if !strings.Contains(err.Error(), "engram_endpoint") {
 		t.Errorf("expected hint mentioning engram_endpoint, got: %v", err)
 	}
+}
+
+func TestSaveCore_FallsBackWhenSynthesisFailsAndKeepsHumanBoundaries(t *testing.T) {
+	dir := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	res, err := saveCore(context.Background(), saveDeps{
+		Client: engram.NewMockClient(),
+		Synth:  errSynthesizer{err: context.DeadlineExceeded},
+		Vault:  obsidian.NewVault(dir),
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}, saveInput{
+		Project: "silo2",
+		Text:    "Captured title from input",
+		Why:     "Human reason survives",
+	})
+	if err != nil {
+		t.Fatalf("saveCore: %v", err)
+	}
+	if res.ObservationID == "" || res.SeedPath == "" {
+		t.Fatalf("expected capture and fallback seed, got %+v", res)
+	}
+	matches, _ := filepath.Glob(filepath.Join(dir, "Inbox/open/seed-*.md"))
+	if len(matches) != 1 {
+		t.Fatalf("expected one fallback seed, got %v", matches)
+	}
+	body, readErr := os.ReadFile(matches[0])
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	md := string(body)
+	if !strings.Contains(md, "# Captured title from input") {
+		t.Fatalf("seed title should come from observation input, got:\n%s", md)
+	}
+	if !strings.Contains(md, "## Capture Why") || !strings.Contains(md, "Human reason survives") {
+		t.Fatalf("expected human why section in fallback seed, got:\n%s", md)
+	}
+	if !strings.Contains(md, "## Human Notes\n\nTODO.") {
+		t.Fatalf("expected untouched Human Notes placeholder, got:\n%s", md)
+	}
+	if !strings.Contains(stderr.String(), "fallback") {
+		t.Fatalf("expected fallback warning, got: %s", stderr.String())
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "Curated")); !os.IsNotExist(statErr) {
+		t.Fatalf("save should not create Curated output, stat err=%v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "Outputs")); !os.IsNotExist(statErr) {
+		t.Fatalf("save should not create Outputs, stat err=%v", statErr)
+	}
+}
+
+type mockSynthesizer struct {
+	proposal synthesis.Proposal
+	err      error
+}
+
+func (m mockSynthesizer) Synthesize(context.Context, synthesis.Source) (synthesis.Proposal, error) {
+	if m.err != nil {
+		return synthesis.Proposal{}, m.err
+	}
+	return m.proposal, nil
+}
+
+type errSynthesizer struct{ err error }
+
+func (e errSynthesizer) Synthesize(context.Context, synthesis.Source) (synthesis.Proposal, error) {
+	return synthesis.Proposal{}, e.err
+}
+
+func mockSynthesizerFromSeed(t *testing.T, gen *seed.MockGenerator) mockSynthesizer {
+	t.Helper()
+	seedValue, err := gen.Generate(engram.Observation{ID: "obs-seed", Title: "T", Content: "Body"})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	return mockSynthesizer{proposal: synthesis.Proposal{
+		ProposedSummary:  seedValue.ProposedSummary,
+		SuggestedThemes:  seedValue.SuggestedThemes,
+		WhyItMightMatter: seedValue.WhyItMightMatter,
+	}}
 }
 
 // unsupportedClient lets us exercise the ErrSaveUnsupported branch of

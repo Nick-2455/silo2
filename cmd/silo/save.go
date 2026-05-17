@@ -13,6 +13,7 @@ import (
 	"github.com/nicolasperalta/silo2/internal/engram"
 	"github.com/nicolasperalta/silo2/internal/obsidian"
 	"github.com/nicolasperalta/silo2/internal/seed"
+	"github.com/nicolasperalta/silo2/internal/synthesis"
 )
 
 // `silo save` is the W1 capture verb.
@@ -31,8 +32,8 @@ import (
 //     merged into Observation.Content (Memory is sacred).
 //
 // MVP scope: text input only. URL / PDF / file extraction is a separate
-// change. The mock generator produces deterministic proposals; the real
-// model is also a separate change.
+// change. Seed synthesis is optional and proposal-only; deterministic
+// fallback keeps capture reliable when AI is disabled or fails.
 
 // inboxReadme is written to vault/Inbox/README.md on the first capture
 // so the directory is discoverable in Obsidian and the human knows what
@@ -77,11 +78,11 @@ inbox is the editorial gate between AI proposals and your knowledge.
 // isolation. The CLI wrapper (runSave) builds them from config; tests
 // build them with in-memory fakes.
 type saveDeps struct {
-	Client    engram.Client
-	Generator seed.Generator
-	Vault     *obsidian.Vault
-	Stdout    io.Writer
-	Stderr    io.Writer
+	Client engram.Client
+	Synth  synthesis.Synthesizer
+	Vault  *obsidian.Vault
+	Stdout io.Writer
+	Stderr io.Writer
 }
 
 type saveInput struct {
@@ -104,7 +105,7 @@ func saveCore(ctx context.Context, deps saveDeps, in saveInput) (saveResult, err
 	if text == "" {
 		return saveResult{}, errors.New("save: text is empty")
 	}
-	if deps.Client == nil || deps.Generator == nil || deps.Vault == nil {
+	if deps.Client == nil || deps.Synth == nil || deps.Vault == nil {
 		return saveResult{}, errors.New("save: missing dependencies")
 	}
 
@@ -113,9 +114,9 @@ func saveCore(ctx context.Context, deps saveDeps, in saveInput) (saveResult, err
 		// ID is assigned by the backend. Memory owns identity.
 		Title:     "",
 		Type:      "capture",
-		Content:   text,                              // raw, untouched
+		Content:   text, // raw, untouched
 		Project:   strings.TrimSpace(in.Project),
-		Why:       strings.TrimSpace(in.Why),         // capture metadata
+		Why:       strings.TrimSpace(in.Why), // capture metadata
 		CreatedAt: time.Now().UTC(),
 	}
 	id, err := deps.Client.Save(ctx, obs)
@@ -138,7 +139,17 @@ func saveCore(ctx context.Context, deps saveDeps, in saveInput) (saveResult, err
 	// --- 2. Best-effort: generate and write the Seed. ---
 	res := saveResult{ObservationID: id}
 
-	s, err := deps.Generator.Generate(obs)
+	src := synthesis.Source{
+		Title:       obs.Title,
+		Content:     obs.Content,
+		ContextHint: "silo save observation",
+	}
+	proposal, synthErr := synthesizeWithFallback(ctx, deps.Synth, src)
+	if synthErr != nil {
+		fmt.Fprintf(deps.Stderr, "warning: synthesis failed (%v); using deterministic fallback for observation %s\n", synthErr, id)
+	}
+
+	s, err := seed.BuildFromObservation(obs, proposal)
 	if err != nil {
 		fmt.Fprintf(deps.Stderr, "warning: seed generation failed (%v); observation %s is safe\n", err, id)
 		return res, nil
@@ -201,11 +212,11 @@ func runSave(args []string) error {
 	project := resolveProject(projectVal, cfg.Project)
 
 	deps := saveDeps{
-		Client:    engram.NewClient(cfg),
-		Generator: seed.NewMockGenerator(),
-		Vault:     obsidian.NewVault(cfg.VaultPath),
-		Stdout:    os.Stdout,
-		Stderr:    os.Stderr,
+		Client: engram.NewClient(cfg),
+		Synth:  synthesis.NewConfigured(cfg.LLMProvider, cfg.LLMModel, cfg.LLMAPIKey),
+		Vault:  obsidian.NewVault(cfg.VaultPath),
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
 	}
 
 	_, err = saveCore(context.Background(), deps, saveInput{
@@ -214,6 +225,23 @@ func runSave(args []string) error {
 		Why:     whyVal,
 	})
 	return err
+}
+
+const synthesisTimeout = 5 * time.Second
+
+func synthesizeWithFallback(ctx context.Context, synth synthesis.Synthesizer, src synthesis.Source) (synthesis.Proposal, error) {
+	synthCtx, cancel := context.WithTimeout(ctx, synthesisTimeout)
+	defer cancel()
+
+	proposal, err := synth.Synthesize(synthCtx, src)
+	if err == nil {
+		return proposal, nil
+	}
+	proposal, fallbackErr := synthesis.NewFallback().Synthesize(ctx, src)
+	if fallbackErr != nil {
+		return synthesis.Proposal{}, errors.Join(err, fallbackErr)
+	}
+	return proposal, err
 }
 
 // parseSaveArgs handles --why and --project anywhere in the argument list

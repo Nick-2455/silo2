@@ -179,11 +179,32 @@ go run ./cmd/silo save "MVVM-C navigation insight" --why "I keep forgetting this
 What happens:
 
 1. **Synchronous**: the observation is persisted to Memory (the configured Engram backend) and the CLI prints `Saved. Seed pending.` immediately.
-2. **Best-effort**: a deterministic mock Seed is generated and written to `vault/Inbox/open/seed-<id>.md`. If seed generation fails for any reason, the observation is still safe and a warning is printed to stderr — capture never blocks on AI.
+2. **Best-effort**: Silo synthesizes only `Proposed Summary`, `Suggested Themes`, and `Why It Might Matter`, then writes `vault/Inbox/open/seed-<id>.md`.
+3. **Fallback-safe**: if AI is disabled, misconfigured, times out, rate-limits, returns bad JSON, or otherwise fails, Silo falls back to a deterministic proposal and still finishes the save.
 
 Flag order is flexible: `--why` and `--project` may appear before or after the text.
 
 **Capture metadata vs content**: `--why` is stored as `Observation.Why` (capture metadata), never merged into the observation content. The seed renders it under a dedicated `## Capture Why` section attributed to the human, separate from any AI-authored sections.
+
+**Human-owned boundary**: AI may propose text only for `Proposed Summary`, `Suggested Themes`, and `Why It Might Matter`. Seed ID, filename, title, source observation IDs, legacy path, frontmatter status, and `Human Notes` remain deterministic and human-owned.
+
+### `silo import-wiki`
+
+Imports a legacy Markdown wiki into reviewable Inbox seeds without mutating the source vault.
+
+```bash
+go run ./cmd/silo import-wiki ./path/to/wiki
+go run ./cmd/silo import-wiki ./path/to/wiki --limit 10 --include-readme
+```
+
+What happens:
+
+1. Each legacy Markdown file is read from the source wiki only.
+2. Its content is persisted to Memory first.
+3. Silo synthesizes proposal-only AI fields best-effort, then writes `vault/Inbox/open/seed-<id>.md` with `WriteNoteIfAbsent`.
+4. Seed identity stays deterministic from `relPath + content`, so re-imports skip existing files instead of overwriting them.
+
+If AI is disabled or fails, import continues with deterministic fallback text. `LegacyPath` remains derived from the source relative path only.
 
 ### `silo inbox`
 
@@ -232,6 +253,29 @@ Fields:
 - `engram_endpoint`: Engram HTTP endpoint. If empty, Silo uses the built-in mock client.
 - `engram_api_key`: optional bearer token for Engram HTTP requests.
 - `identity_name`: optional override for the generated identity name.
+- `llm_provider`: optional AI provider. Empty disables AI and uses deterministic fallback. Current supported value: `openai`.
+- `llm_model`: optional provider model override. Empty uses the provider default.
+- `llm_api_key`: optional provider API key. If missing for a configured provider, Silo falls back deterministically.
+
+Example AI-enabled config:
+
+```json
+{
+  "vault_path": "./vault",
+  "project": "silo2",
+  "llm_provider": "openai",
+  "llm_model": "gpt-4.1-mini",
+  "llm_api_key": "<your-key>"
+}
+```
+
+Fallback rules:
+
+- Empty provider: AI disabled, deterministic fallback only.
+- Invalid provider: deterministic fallback.
+- Missing key: deterministic fallback.
+- Timeout, rate limit, provider outage, or bad JSON: deterministic fallback.
+- No AI failure is allowed to break `silo save` or `silo import-wiki` after Memory persistence succeeds.
 
 Project precedence:
 

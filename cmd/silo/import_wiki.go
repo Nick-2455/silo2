@@ -3,8 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +18,7 @@ import (
 	"github.com/nicolasperalta/silo2/internal/engram"
 	"github.com/nicolasperalta/silo2/internal/obsidian"
 	"github.com/nicolasperalta/silo2/internal/seed"
+	"github.com/nicolasperalta/silo2/internal/synthesis"
 )
 
 // `silo import-wiki <path>` imports a legacy Obsidian wiki folder as reviewable
@@ -30,14 +29,15 @@ import (
 //   - NEVER writes Curated/ directly.
 //   - Deterministic + idempotent rendering (WriteNoteIfAbsent).
 //   - Path is a weak signal only: stored in the seed body under "## Source".
-//   - No LLM: uses the deterministic mock generator.
+//   - AI is optional and proposal-only. Any synthesis failure must fall
+//     back deterministically without breaking import.
 //   - Imports wiki/ only (raw/ is out of scope).
 
 type importWikiDeps struct {
-	Client    engram.Client
-	Generator seed.Generator
-	Vault     *obsidian.Vault
-	Stdout    io.Writer
+	Client engram.Client
+	Synth  synthesis.Synthesizer
+	Vault  *obsidian.Vault
+	Stdout io.Writer
 }
 
 type importWikiInput struct {
@@ -80,10 +80,10 @@ func runImportWiki(args []string) error {
 	project := resolveProject(projectVal, cfg.Project)
 
 	deps := importWikiDeps{
-		Client:    engram.NewClient(cfg),
-		Generator: seed.NewMockGenerator(),
-		Vault:     obsidian.NewVault(cfg.VaultPath),
-		Stdout:    os.Stdout,
+		Client: engram.NewClient(cfg),
+		Synth:  synthesis.NewConfigured(cfg.LLMProvider, cfg.LLMModel, cfg.LLMAPIKey),
+		Vault:  obsidian.NewVault(cfg.VaultPath),
+		Stdout: os.Stdout,
 	}
 	_, err = importWikiCore(context.Background(), deps, importWikiInput{
 		Project:       project,
@@ -171,7 +171,7 @@ func parseNonNegativeInt(s string) (int, error) {
 }
 
 func importWikiCore(ctx context.Context, deps importWikiDeps, in importWikiInput) (importWikiResult, error) {
-	if deps.Client == nil || deps.Generator == nil || deps.Vault == nil || deps.Stdout == nil {
+	if deps.Client == nil || deps.Synth == nil || deps.Vault == nil || deps.Stdout == nil {
 		return importWikiResult{}, errors.New("import-wiki: missing dependencies")
 	}
 	if strings.TrimSpace(in.Project) == "" {
@@ -269,16 +269,17 @@ func importWikiCore(ctx context.Context, deps importWikiDeps, in importWikiInput
 		res.ObservationsSaved++
 		obs.ID = id
 
-		s, err := deps.Generator.Generate(obs)
+		src := synthesis.Source{
+			Title:       obs.Title,
+			Content:     obs.Content,
+			ContextHint: "silo import-wiki observation",
+		}
+		proposal, _ := synthesizeWithFallback(ctx, deps.Synth, src)
+
+		s, err := seed.BuildFromImport(obs, rel, content, proposal)
 		if err != nil {
 			return importWikiResult{}, fmt.Errorf("seed generate for %s: %w", p, err)
 		}
-		// Seed identity for imports must be deterministic across runs.
-		// Engram observation IDs are not stable for this purpose (the import
-		// will generate a new observation each run). Hash the stable inputs
-		// (legacy relative path + content) to avoid duplicating seeds.
-		s.ID = importSeedID(rel, content)
-		s.LegacyPath = rel
 
 		md, err := seed.Render(s)
 		if err != nil {
@@ -361,15 +362,4 @@ func firstH1(md string) string {
 		break
 	}
 	return ""
-}
-
-// importSeedID returns a stable seed ID for a legacy wiki file.
-// It intentionally does NOT depend on Engram observation IDs.
-func importSeedID(relPath string, content string) string {
-	h := sha256.New()
-	_, _ = h.Write([]byte(strings.TrimSpace(relPath)))
-	_, _ = h.Write([]byte{0})
-	_, _ = h.Write([]byte(content))
-	sum := h.Sum(nil)
-	return "seed-" + hex.EncodeToString(sum[:4])
 }
