@@ -13,6 +13,9 @@ type Config struct {
 	EngramEndpoint string `json:"engram_endpoint,omitempty"`
 	EngramAPIKey   string `json:"engram_api_key,omitempty"`
 	IdentityName   string `json:"identity_name,omitempty"`
+	LLMProvider    string `json:"llm_provider,omitempty"`
+	LLMModel       string `json:"llm_model,omitempty"`
+	LLMAPIKey      string `json:"llm_api_key,omitempty"`
 
 	// Project is the Engram project name Silo will read from. If empty,
 	// the CLI falls back to DefaultProject. This default exists only for
@@ -40,6 +43,9 @@ func Default() *Config {
 		EngramEndpoint: "",
 		EngramAPIKey:   "",
 		IdentityName:   "",
+		LLMProvider:    "",
+		LLMModel:       "",
+		LLMAPIKey:      "",
 		Project:        "",
 	}
 }
