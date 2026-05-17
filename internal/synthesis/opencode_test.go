@@ -185,6 +185,43 @@ func TestOpenCodeComplete_NeverLogsCommandArgs(t *testing.T) {
 	}
 }
 
+func TestBuildOpenCodePrompt_DisablesTools(t *testing.T) {
+	prompt := buildOpenCodePrompt(Source{Title: "Title", Content: "Body", ContextHint: "Context"})
+
+	for _, required := range []string{
+		"Do not use tools.",
+		"Do not call bash.",
+		"Do not write files.",
+		"Return only a JSON object.",
+	} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("buildOpenCodePrompt() missing %q in %q", required, prompt)
+		}
+	}
+}
+
+func TestOpenCodeComplete_PassesHardenedPromptToRunner(t *testing.T) {
+	var gotArgs []string
+	provider := newOpenCodeProviderWithRunner("opencode", func(_ context.Context, _ string, args []string) ([]byte, error) {
+		gotArgs = append([]string(nil), args...)
+		return []byte(openCodeTextLine(validOpenCodeProposal)), nil
+	})
+
+	_, err := provider.Complete(context.Background(), Request{Model: "model", Source: Source{Title: "Title", Content: "Body"}})
+	if err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+	if len(gotArgs) == 0 {
+		t.Fatal("runner args were not captured")
+	}
+	prompt := gotArgs[len(gotArgs)-1]
+	for _, required := range []string{"Do not use tools.", "Do not call bash.", "Do not write files.", "Return only a JSON object."} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("Complete() prompt missing %q in %q", required, prompt)
+		}
+	}
+}
+
 func fakeOpenCodeTextRunner(text string) opencodeRunner {
 	return func(context.Context, string, []string) ([]byte, error) {
 		return []byte(openCodeTextLine(text)), nil

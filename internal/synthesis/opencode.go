@@ -123,5 +123,5 @@ func isOpenCodeJSONObjectString(content string) bool {
 }
 
 func buildOpenCodePrompt(src Source) string {
-	return fmt.Sprintf("You generate conservative proposal text for human review only. Respond with exactly one strict JSON object with keys proposed_summary, suggested_themes, and why_it_might_matter. Do not add other keys, markdown, or claims beyond the source text.\n\nTitle: %s\nContent: %s\nContext: %s", src.Title, src.Content, src.ContextHint)
+	return fmt.Sprintf("You generate conservative proposal text for human review only. Do not use tools. Do not call bash. Do not write files. Return only a JSON object. The JSON object must contain keys proposed_summary, suggested_themes, and why_it_might_matter. Do not add other keys, markdown, or claims beyond the source text.\n\nTitle: %s\nContent: %s\nContext: %s", src.Title, src.Content, src.ContextHint)
 }
