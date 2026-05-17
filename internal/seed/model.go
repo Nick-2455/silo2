@@ -60,4 +60,10 @@ type Seed struct {
 	// Obsidian wiki relative path). It MUST NOT be treated as taxonomy.
 	// Rendered in the seed under "## Source" for human review.
 	LegacyPath string
+
+	// SourceType and SourceURL are caller-owned metadata attached at save
+	// time. They are never synthesized by AI and must not affect seed
+	// identity.
+	SourceType string
+	SourceURL  string
 }

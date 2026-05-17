@@ -192,6 +192,52 @@ func TestRender_IncludesLegacySourceSectionWhenPresent(t *testing.T) {
 	}
 }
 
+func TestRender_IncludesCallerOwnedSourceSectionBeforeHumanSections(t *testing.T) {
+	s := Seed{
+		ID:                   "seed-1",
+		Title:                "T",
+		SourceObservationIDs: []string{"obs-1"},
+		SuggestedThemes:      []string{"unclassified"},
+		SourceType:           "article",
+		SourceURL:            "https://example.com/post",
+		UserWhy:              "Human reason",
+	}
+
+	out, err := Render(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "## Sources\n\n- article: https://example.com/post") {
+		t.Fatalf("missing caller-owned source section:\n%s", out)
+	}
+	sourcesIdx := strings.Index(out, "## Sources")
+	whyIdx := strings.Index(out, "## Capture Why")
+	notesIdx := strings.Index(out, "## Human Notes")
+	if sourcesIdx < 0 || whyIdx < 0 || notesIdx < 0 {
+		t.Fatalf("expected sections missing:\n%s", out)
+	}
+	if !(sourcesIdx < whyIdx && sourcesIdx < notesIdx) {
+		t.Fatalf("Sources section must appear before human sections:\n%s", out)
+	}
+}
+
+func TestRender_OmitsCallerOwnedSourceSectionWhenEmpty(t *testing.T) {
+	s := Seed{
+		ID:                   "seed-1",
+		Title:                "T",
+		SourceObservationIDs: []string{"obs-1"},
+		SuggestedThemes:      []string{"unclassified"},
+	}
+
+	out, err := Render(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "## Sources") {
+		t.Fatalf("unexpected caller-owned source section:\n%s", out)
+	}
+}
+
 func TestRender_ErrorsOnInvalidSeed(t *testing.T) {
 	if _, err := Render(Seed{}); err == nil {
 		t.Error("expected error on zero-value seed (missing ID and sources)")
