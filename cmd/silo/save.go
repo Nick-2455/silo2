@@ -78,11 +78,12 @@ inbox is the editorial gate between AI proposals and your knowledge.
 // isolation. The CLI wrapper (runSave) builds them from config; tests
 // build them with in-memory fakes.
 type saveDeps struct {
-	Client engram.Client
-	Synth  synthesis.Synthesizer
-	Vault  *obsidian.Vault
-	Stdout io.Writer
-	Stderr io.Writer
+	Client  engram.Client
+	Synth   synthesis.Synthesizer
+	Vault   *obsidian.Vault
+	Timeout time.Duration
+	Stdout  io.Writer
+	Stderr  io.Writer
 }
 
 type saveInput struct {
@@ -144,7 +145,7 @@ func saveCore(ctx context.Context, deps saveDeps, in saveInput) (saveResult, err
 		Content:     obs.Content,
 		ContextHint: "silo save observation",
 	}
-	proposal, synthErr := synthesizeWithFallback(ctx, deps.Synth, src)
+	proposal, synthErr := synthesizeWithFallback(ctx, deps.Synth, src, deps.Timeout)
 	if synthErr != nil {
 		fmt.Fprintf(deps.Stderr, "warning: synthesis failed (%v); using deterministic fallback for observation %s\n", synthErr, id)
 	}
@@ -212,11 +213,12 @@ func runSave(args []string) error {
 	project := resolveProject(projectVal, cfg.Project)
 
 	deps := saveDeps{
-		Client: engram.NewClient(cfg),
-		Synth:  synthesis.NewConfigured(cfg.LLMProvider, cfg.LLMModel, cfg.LLMAPIKey),
-		Vault:  obsidian.NewVault(cfg.VaultPath),
-		Stdout: os.Stdout,
-		Stderr: os.Stderr,
+		Client:  engram.NewClient(cfg),
+		Synth:   synthesis.NewConfigured(cfg.LLMProvider, cfg.LLMModel, cfg.LLMAPIKey),
+		Vault:   obsidian.NewVault(cfg.VaultPath),
+		Timeout: cfg.SynthesisTimeout(),
+		Stdout:  os.Stdout,
+		Stderr:  os.Stderr,
 	}
 
 	_, err = saveCore(context.Background(), deps, saveInput{
@@ -227,10 +229,11 @@ func runSave(args []string) error {
 	return err
 }
 
-const synthesisTimeout = 5 * time.Second
-
-func synthesizeWithFallback(ctx context.Context, synth synthesis.Synthesizer, src synthesis.Source) (synthesis.Proposal, error) {
-	synthCtx, cancel := context.WithTimeout(ctx, synthesisTimeout)
+func synthesizeWithFallback(ctx context.Context, synth synthesis.Synthesizer, src synthesis.Source, timeout time.Duration) (synthesis.Proposal, error) {
+	if timeout <= 0 {
+		timeout = config.DefaultLLMTimeout
+	}
+	synthCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	proposal, err := synth.Synthesize(synthCtx, src)

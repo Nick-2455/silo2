@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/nicolasperalta/silo2/internal/config"
 	"github.com/nicolasperalta/silo2/internal/engram"
 	"github.com/nicolasperalta/silo2/internal/obsidian"
 	"github.com/nicolasperalta/silo2/internal/seed"
@@ -312,6 +314,78 @@ func TestSaveCore_FallsBackWhenSynthesisFailsAndKeepsHumanBoundaries(t *testing.
 	}
 }
 
+func TestSynthesizeWithFallback_RespectsConfiguredTimeout(t *testing.T) {
+	tests := []struct {
+		name    string
+		timeout time.Duration
+	}{
+		{name: "two seconds", timeout: 2 * time.Second},
+		{name: "thirty seconds", timeout: 30 * time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			synth := &deadlineSynthesizer{}
+			started := time.Now()
+
+			_, err := synthesizeWithFallback(context.Background(), synth, synthesis.Source{Content: "x"}, tt.timeout)
+			if err != nil {
+				t.Fatalf("synthesizeWithFallback() error = %v", err)
+			}
+
+			assertDeadlineNear(t, synth.deadline, started.Add(tt.timeout), 100*time.Millisecond)
+		})
+	}
+}
+
+func TestSynthesizeWithFallback_ZeroOrNegativeUsesDefault(t *testing.T) {
+	tests := []struct {
+		name    string
+		timeout time.Duration
+	}{
+		{name: "zero", timeout: 0},
+		{name: "negative", timeout: -time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			synth := &deadlineSynthesizer{}
+			started := time.Now()
+
+			_, err := synthesizeWithFallback(context.Background(), synth, synthesis.Source{Content: "x"}, tt.timeout)
+			if err != nil {
+				t.Fatalf("synthesizeWithFallback() error = %v", err)
+			}
+
+			assertDeadlineNear(t, synth.deadline, started.Add(config.DefaultLLMTimeout), 100*time.Millisecond)
+		})
+	}
+}
+
+func TestSynthesizeWithFallback_FallbackStillFiresOnTimeout(t *testing.T) {
+	src := synthesis.Source{Title: "Captured title", Content: "Body text"}
+	synth := &deadlineSynthesizer{block: true}
+
+	proposal, err := synthesizeWithFallback(context.Background(), synth, src, 50*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected timeout error returned alongside fallback proposal")
+	}
+
+	want, fallbackErr := synthesis.NewFallback().Synthesize(context.Background(), src)
+	if fallbackErr != nil {
+		t.Fatalf("fallback synthesize: %v", fallbackErr)
+	}
+	if proposal.ProposedSummary != want.ProposedSummary {
+		t.Fatalf("ProposedSummary = %q, want %q", proposal.ProposedSummary, want.ProposedSummary)
+	}
+	if strings.Join(proposal.SuggestedThemes, ",") != strings.Join(want.SuggestedThemes, ",") {
+		t.Fatalf("SuggestedThemes = %v, want %v", proposal.SuggestedThemes, want.SuggestedThemes)
+	}
+	if proposal.WhyItMightMatter != want.WhyItMightMatter {
+		t.Fatalf("WhyItMightMatter = %q, want %q", proposal.WhyItMightMatter, want.WhyItMightMatter)
+	}
+}
+
 type mockSynthesizer struct {
 	proposal synthesis.Proposal
 	err      error
@@ -328,6 +402,36 @@ type errSynthesizer struct{ err error }
 
 func (e errSynthesizer) Synthesize(context.Context, synthesis.Source) (synthesis.Proposal, error) {
 	return synthesis.Proposal{}, e.err
+}
+
+type deadlineSynthesizer struct {
+	deadline time.Time
+	block    bool
+}
+
+func (d *deadlineSynthesizer) Synthesize(ctx context.Context, _ synthesis.Source) (synthesis.Proposal, error) {
+	if deadline, ok := ctx.Deadline(); ok {
+		d.deadline = deadline
+	}
+	if d.block {
+		<-ctx.Done()
+		return synthesis.Proposal{}, ctx.Err()
+	}
+	return synthesis.Proposal{ProposedSummary: "x", SuggestedThemes: []string{"t"}, WhyItMightMatter: "y"}, nil
+}
+
+func assertDeadlineNear(t *testing.T, got, want time.Time, tolerance time.Duration) {
+	t.Helper()
+	if got.IsZero() {
+		t.Fatal("expected synthesizer context deadline, got zero time")
+	}
+	delta := got.Sub(want)
+	if delta < 0 {
+		delta = -delta
+	}
+	if delta > tolerance {
+		t.Fatalf("deadline = %v, want within %v of %v (delta %v)", got, tolerance, want, delta)
+	}
 }
 
 func mockSynthesizerFromSeed(t *testing.T, gen *seed.MockGenerator) mockSynthesizer {

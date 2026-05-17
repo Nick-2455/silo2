@@ -256,6 +256,7 @@ Fields:
 - `llm_provider`: optional AI provider. Empty disables AI and uses deterministic fallback. Current supported value: `openai`.
 - `llm_model`: optional provider model override. Empty uses the provider default.
 - `llm_api_key`: optional provider API key. If missing for a configured provider, Silo falls back deterministically.
+- `llm_timeout_seconds`: optional synthesis timeout in seconds. Defaults to 5. Use higher values (e.g. 30) for slow providers that involve subprocesses.
 
 Example AI-enabled config:
 

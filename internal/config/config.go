@@ -4,18 +4,22 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"time"
 )
 
 const defaultConfigPath = "./silo.config.json"
 
+const DefaultLLMTimeout = 5 * time.Second
+
 type Config struct {
-	VaultPath      string `json:"vault_path"`
-	EngramEndpoint string `json:"engram_endpoint,omitempty"`
-	EngramAPIKey   string `json:"engram_api_key,omitempty"`
-	IdentityName   string `json:"identity_name,omitempty"`
-	LLMProvider    string `json:"llm_provider,omitempty"`
-	LLMModel       string `json:"llm_model,omitempty"`
-	LLMAPIKey      string `json:"llm_api_key,omitempty"`
+	VaultPath         string `json:"vault_path"`
+	EngramEndpoint    string `json:"engram_endpoint,omitempty"`
+	EngramAPIKey      string `json:"engram_api_key,omitempty"`
+	IdentityName      string `json:"identity_name,omitempty"`
+	LLMProvider       string `json:"llm_provider,omitempty"`
+	LLMModel          string `json:"llm_model,omitempty"`
+	LLMAPIKey         string `json:"llm_api_key,omitempty"`
+	LLMTimeoutSeconds int    `json:"llm_timeout_seconds,omitempty"`
 
 	// Project is the Engram project name Silo will read from. If empty,
 	// the CLI falls back to DefaultProject. This default exists only for
@@ -48,6 +52,13 @@ func Default() *Config {
 		LLMAPIKey:      "",
 		Project:        "",
 	}
+}
+
+func (c *Config) SynthesisTimeout() time.Duration {
+	if c == nil || c.LLMTimeoutSeconds <= 0 {
+		return DefaultLLMTimeout
+	}
+	return time.Duration(c.LLMTimeoutSeconds) * time.Second
 }
 
 func Load() (*Config, error) {

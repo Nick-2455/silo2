@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nicolasperalta/silo2/internal/engram"
 	"github.com/nicolasperalta/silo2/internal/obsidian"
@@ -288,4 +289,27 @@ func TestImportWiki_DifferentAITextStillSkipsExistingDeterministicSeed(t *testin
 	if res.SeedsSkipped != 1 || res.SeedsWritten != 0 {
 		t.Fatalf("expected deterministic skip on rerun, got %+v", res)
 	}
+}
+
+func TestImportWiki_UsesConfiguredTimeout(t *testing.T) {
+	legacy := t.TempDir()
+	if err := os.WriteFile(filepath.Join(legacy, "note.md"), []byte("# T\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	synth := &deadlineSynthesizer{}
+	deps := importWikiDeps{
+		Client:  engram.NewMockClient(),
+		Synth:   synth,
+		Vault:   obsidian.NewVault(t.TempDir()),
+		Stdout:  &bytes.Buffer{},
+		Timeout: 2 * time.Second,
+	}
+	started := time.Now()
+
+	_, err := importWikiCore(context.Background(), deps, importWikiInput{Project: "silo2", Root: legacy})
+	if err != nil {
+		t.Fatalf("importWikiCore: %v", err)
+	}
+
+	assertDeadlineNear(t, synth.deadline, started.Add(2*time.Second), 100*time.Millisecond)
 }
