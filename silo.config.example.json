@@ -1,0 +1,7 @@
+{
+  "vault_path": "./vault",
+  "project": "silo2",
+  "engram_endpoint": "http://127.0.0.1:7437",
+  "engram_api_key": "",
+  "identity_name": "Nicolas Peralta"
+}

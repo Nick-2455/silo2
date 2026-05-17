@@ -1,0 +1,17 @@
+# Local generated vault contents
+vault/
+
+# Local runtime configuration
+silo.config.json
+
+# Local agent/project metadata
+.atl/
+
+# Build artifacts
+/silo
+bin/
+
+# OS/editor noise
+.DS_Store
+*.swp
+*.swo
