@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -25,6 +26,28 @@ type Config struct {
 	// the CLI falls back to DefaultProject. This default exists only for
 	// local development convenience and may become required in the future.
 	Project string `json:"project,omitempty"`
+
+	// SchedulePath is the JSON file where the schedule is persisted.
+	// Defaults to DefaultSchedulePath() when empty.
+	SchedulePath string `json:"schedule_path,omitempty"`
+
+	// ProductiveHours defines productive time windows as [start, end] pairs
+	// in HH:MM format. Used by the recommend engine to find workable slots.
+	ProductiveHours [][2]string `json:"productive_hours,omitempty"`
+}
+
+// DefaultSchedulePath returns the default schedule file location.
+func DefaultSchedulePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "./schedule.json"
+	}
+	return filepath.Join(home, ".config", "silo2", "schedule.json")
+}
+
+// DefaultProductiveHours returns the standard productive windows.
+func DefaultProductiveHours() [][2]string {
+	return [][2]string{{"08:00", "12:00"}, {"14:00", "18:00"}}
 }
 
 // DefaultProject is the temporary fallback project name used when neither
