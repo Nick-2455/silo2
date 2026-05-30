@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,11 +14,23 @@ import (
 	"github.com/nicolasperalta/silo2/internal/config"
 	"github.com/nicolasperalta/silo2/internal/engram"
 	"github.com/nicolasperalta/silo2/internal/identity"
+	siloMCP "github.com/nicolasperalta/silo2/internal/mcp"
 	"github.com/nicolasperalta/silo2/internal/markdown"
 	"github.com/nicolasperalta/silo2/internal/obsidian"
 )
 
 func main() {
+	// --server flag: start MCP server over stdio.
+	for _, a := range os.Args {
+		if a == "--server" || a == "--mcp" {
+			if err := runServer(); err != nil {
+				fmt.Fprintln(os.Stderr, "server error:", err)
+				os.Exit(1)
+			}
+			return
+		}
+	}
+
 	if len(os.Args) < 2 {
 		printHelp(os.Stdout)
 		os.Exit(0)
@@ -29,6 +42,12 @@ func main() {
 	switch cmd {
 	case "help", "-h", "--help":
 		printHelp(os.Stdout)
+		return
+	case "server":
+		if err := runServer(); err != nil {
+			fmt.Fprintln(os.Stderr, "server error:", err)
+			os.Exit(1)
+		}
 		return
 	case "init":
 		if err := runInit(); err != nil {
@@ -72,8 +91,26 @@ func main() {
 			os.Exit(1)
 		}
 		return
+	case "recommend":
+		if err := runRecommend(rest); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
 	case "import-wiki":
 		if err := runImportWiki(rest); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
+	case "import-playlist":
+		if err := runImportPlaylist(rest); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
+	case "videos":
+		if err := runVideos(rest); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
 		}
@@ -90,6 +127,7 @@ func printHelp(w *os.File) {
 
 Usage:
   silo <command> [flags]
+  silo --server               Start MCP server over stdio
 
 Commands:
   init     Create ./silo.config.json (idempotent)
@@ -99,7 +137,11 @@ Commands:
   outputs  Seed professional outputs (CV / LinkedIn / Bio) under Outputs/
   save     Capture a text observation and propose a Seed under Inbox/open/
   inbox    List seed counts by status and open seed filenames
+  recommend  Suggest what to do next based on profile, seeds, and schedule
   import-wiki  Import legacy wiki/*.md as Inbox/open seeds (experimental)
+  import-playlist  Import a YouTube playlist as individual video Seeds
+  videos   Generate a global Watch Later list from video Seeds
+  server   Start MCP server over stdio (same as --server)
   help     Print this help
 
 Flags:
@@ -409,4 +451,198 @@ func runOutputs(args []string) error {
 	fmt.Printf("outputs skipped (kept human edits): %d\n", skipped)
 	fmt.Printf("destination: %s/%s\n", cfg.VaultPath, subdir)
 	return nil
+}
+
+// runServer starts the MCP server over stdio transport.
+func runServer() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	client := engram.NewClient(cfg)
+	siloMCP.SetDeps(siloMCP.Deps{
+		Config: cfg,
+		Engram: client,
+	})
+
+	s := siloMCP.NewServer()
+	fmt.Fprintf(os.Stderr, "silo MCP server starting (stdio)...\n")
+	if err := siloMCP.ServeStdio(s); err != nil {
+		return fmt.Errorf("mcp server: %w", err)
+	}
+	return nil
+}
+
+// runRecommend prints activity suggestions based on profile, seeds, and schedule.
+func runRecommend(args []string) error {
+	fs := flag.NewFlagSet("recommend", flag.ContinueOnError)
+	dateFlag := fs.String("date", time.Now().Format("2006-01-02"), "Date in YYYY-MM-DD format")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	vaultPath := cfg.VaultPath
+	if vaultPath == "" {
+		vaultPath = "./vault"
+	}
+
+	// Read profile.
+	profilePath := vaultPath + "/Silo/Profile.md"
+	profile := siloMCP.ProfileData{}
+	if data, err := os.ReadFile(profilePath); err == nil {
+		profile = parseProfileFromFile(string(data))
+	}
+
+	// Scan open seeds.
+	inboxDir := vaultPath + "/Inbox/open"
+	seeds := scanOpenSeedsForCLI(inboxDir)
+
+	// Read schedule and calculate free time for today.
+	schedulePath := cfg.SchedulePath
+	if schedulePath == "" {
+		schedulePath = config.DefaultSchedulePath()
+	}
+	freeMin := 0
+	if schData, err := os.ReadFile(schedulePath); err == nil {
+		var sch struct {
+			Events []struct {
+				Start           string `json:"start"`
+				DurationMinutes int    `json:"duration_minutes"`
+				Days            []string `json:"days"`
+			} `json:"events"`
+		}
+		if jsonErr := json.Unmarshal(schData, &sch); jsonErr == nil {
+			today := *dateFlag
+			// Count minutes occupied by events matching today.
+			for _, ev := range sch.Events {
+				if eventMatchesDate(ev.Days, today) {
+					freeMin += ev.DurationMinutes
+				}
+			}
+		}
+	}
+	// Productive hours total: default 8h = 480 min.
+	freeMin = 480 - freeMin
+	if freeMin < 0 {
+		freeMin = 0
+	}
+
+	// Print recommendations.
+	fmt.Println(renderCLIRecommend(*dateFlag, freeMin, profile, seeds))
+	return nil
+}
+
+func eventMatchesDate(days []string, date string) bool {
+	if len(days) == 0 {
+		return true
+	}
+	t, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return false
+	}
+	dateStr := t.Format("2006-01-02")
+	weekday := strings.ToLower(t.Weekday().String())[:3]
+	for _, d := range days {
+		low := strings.ToLower(strings.TrimSpace(d))
+		if low == dateStr || low == weekday {
+			return true
+		}
+	}
+	return false
+}
+
+func parseProfileFromFile(raw string) siloMCP.ProfileData {
+	fm := extractFrontmatterFromFile(raw)
+	if fm == "" {
+		return siloMCP.ProfileData{}
+	}
+	var p siloMCP.ProfileData
+	json.Unmarshal([]byte(fm), &p)
+	return p
+}
+
+func extractFrontmatterFromFile(s string) string {
+	if len(s) < 4 || s[:3] != "---" {
+		return ""
+	}
+	rest := s[3:]
+	if len(rest) > 0 && rest[0] == '\n' {
+		rest = rest[1:]
+	}
+	for i := 0; i < len(rest)-2; i++ {
+		if rest[i] == '\n' && rest[i+1] == '-' && rest[i+2] == '-' && rest[i+3] == '-' {
+			return rest[:i]
+		}
+	}
+	return ""
+}
+
+type cliSeed struct {
+	title string
+	path  string
+}
+
+func scanOpenSeedsForCLI(dir string) []cliSeed {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var seeds []cliSeed
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".md") {
+			continue
+		}
+		if strings.EqualFold(e.Name(), "README.md") {
+			continue
+		}
+		data, err := os.ReadFile(dir + "/" + e.Name())
+		if err != nil {
+			continue
+		}
+		title := "(untitled)"
+		for _, line := range strings.Split(string(data), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "# ") {
+				title = strings.TrimSpace(trimmed[2:])
+				break
+			}
+		}
+		seeds = append(seeds, cliSeed{title: title, path: "Inbox/open/" + e.Name()})
+	}
+	return seeds
+}
+
+func renderCLIRecommend(date string, freeMin int, profile siloMCP.ProfileData, seeds []cliSeed) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("## Recomendaciones para %s (%d minutos libres)\n\n", date, freeMin))
+
+	if len(profile.CurrentFocus) > 0 {
+		b.WriteString("**Foco actual:** ")
+		b.WriteString(strings.Join(profile.CurrentFocus, ", "))
+		b.WriteString("\n\n")
+	}
+
+	if len(seeds) == 0 {
+		b.WriteString("*No hay seeds abiertos. Guardá algo nuevo con `silo save`.*\n")
+		return b.String()
+	}
+
+	b.WriteString("### Ver ahora\n\n")
+	for i, s := range seeds {
+		if i >= 5 {
+			b.WriteString(fmt.Sprintf("\n*...y %d más en Inbox/open.*\n", len(seeds)-5))
+			break
+		}
+		b.WriteString(fmt.Sprintf("- **%s** — `%s`\n", s.title, s.path))
+	}
+
+	b.WriteString("\n---\n")
+	b.WriteString("*v1: motor de recomendación simple. Próxima versión usará IA para rankear por prioridad.*\n")
+	return b.String()
 }
