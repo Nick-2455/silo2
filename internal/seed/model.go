@@ -66,4 +66,12 @@ type Seed struct {
 	// identity.
 	SourceType string
 	SourceURL  string
+
+	// Source metadata is best-effort caller-owned enrichment, typically
+	// extracted from the SourceURL (e.g. via yt-dlp for YouTube videos).
+	// It is NOT AI-authored.
+	SourceTitle           string
+	SourceChannel         string
+	SourceDurationSeconds int
+	SourceDescription     string
 }

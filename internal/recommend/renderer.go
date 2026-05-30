@@ -8,7 +8,7 @@ import (
 // RenderMarkdown formats recommendations as a human-readable markdown block.
 func RenderMarkdown(date string, freeMinutes int, recs []Recommendation) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("## Recomendaciones para %s (%d minutos libres)\n\n", date, freeMinutes))
+	b.WriteString(fmt.Sprintf("## Recomendaciones para %s (%s libres)\n\n", date, fmtDuration(freeMinutes)))
 
 	groups := groupByLabel(recs)
 	order := []string{"watch-now", "watch-later", "expand", "requires-prerequisite", "skip"}
@@ -27,7 +27,7 @@ func RenderMarkdown(date string, freeMinutes int, recs []Recommendation) string 
 				b.WriteString(fmt.Sprintf(" — `%s`", r.Source))
 			}
 			if r.DurationEstimate > 0 {
-				b.WriteString(fmt.Sprintf(" — %d min", r.DurationEstimate))
+				b.WriteString(fmt.Sprintf(" — %s", fmtDuration(r.DurationEstimate)))
 			}
 			if r.Category != "" {
 				b.WriteString(fmt.Sprintf(" — %s", r.Category))
@@ -47,6 +47,12 @@ func groupByLabel(recs []Recommendation) map[string][]Recommendation {
 		groups[r.Label] = append(groups[r.Label], r)
 	}
 	return groups
+}
+
+func fmtDuration(minutes int) string {
+	h := minutes / 60
+	m := minutes % 60
+	return fmt.Sprintf("%d:%02d", h, m)
 }
 
 func labelHeader(label string) string {
