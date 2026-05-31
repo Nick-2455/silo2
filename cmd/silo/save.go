@@ -160,6 +160,16 @@ func saveCore(ctx context.Context, deps saveDeps, in saveInput) (saveResult, err
 	}
 	s.SourceURL = strings.TrimSpace(in.SourceURL)
 	s.SourceType = strings.TrimSpace(in.SourceType)
+	if strings.EqualFold(s.SourceType, "video") && strings.TrimSpace(s.SourceURL) != "" {
+		if meta, err := extractVideoMetaBestEffort(s.SourceURL); err == nil {
+			s.SourceTitle = meta.Title
+			s.SourceChannel = meta.Channel
+			s.SourceDurationSeconds = meta.DurationSec
+			s.SourceDescription = meta.Description
+		} else {
+			fmt.Fprintf(deps.Stderr, "warning: video metadata extraction failed (%v); continuing\n", err)
+		}
+	}
 
 	md, err := seed.Render(s)
 	if err != nil {
@@ -223,7 +233,16 @@ func runSave(args []string) error {
 	}
 
 	if len(positional) == 0 {
-		return errors.New("silo save: missing input text\n\nUsage: silo save <text> [--why \"...\"] [--source \"https://...\"] [--source-type article|video|course|book|paper|link] [--project <name>]")
+		// For video links, allow URL-only capture and derive the title via yt-dlp.
+		if sourceType == "video" && strings.TrimSpace(sourceURL) != "" {
+			if meta, err := extractVideoMetaBestEffort(sourceURL); err == nil && strings.TrimSpace(meta.Title) != "" {
+				positional = []string{meta.Title}
+			} else {
+				positional = []string{"YouTube video"}
+			}
+		} else {
+			return errors.New("silo save: missing input text\n\nUsage: silo save <text> [--why \"...\"] [--source \"https://...\"] [--source-type article|video|course|book|paper|link] [--project <name>]")
+		}
 	}
 	text := strings.Join(positional, " ")
 

@@ -8,6 +8,34 @@ import (
 	"text/template"
 )
 
+func hasAnySourceMeta(s Seed) bool {
+	return strings.TrimSpace(s.SourceTitle) != "" ||
+		strings.TrimSpace(s.SourceChannel) != "" ||
+		s.SourceDurationSeconds > 0 ||
+		strings.TrimSpace(s.SourceDescription) != ""
+}
+
+func formatDurationSeconds(sec int) string {
+	if sec <= 0 {
+		return ""
+	}
+	h := sec / 3600
+	m := (sec % 3600) / 60
+	s := sec % 60
+	if h > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", h, m, s)
+	}
+	return fmt.Sprintf("%d:%02d", m, s)
+}
+
+func oneLine(s string) string {
+	// Keep the metadata section compact and stable.
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return strings.Join(strings.Fields(s), " ")
+}
+
 // Render turns a Seed into its on-disk markdown form. Output is fully
 // deterministic: no timestamps, no random ordering, no environment reads.
 // Same Seed in, byte-identical bytes out, every time.
@@ -37,6 +65,11 @@ type renderView struct {
 	HasSourceRef     bool
 	SourceType       string
 	SourceURL        string
+	HasSourceMeta    bool
+	SourceTitle      string
+	SourceChannel    string
+	SourceDuration   string
+	SourceDesc       string
 }
 
 // Template is intentionally laid out exactly as it appears on disk.
@@ -72,6 +105,16 @@ source_observation: {{ .SourceCSV }}
 ## Sources
 
 - {{ .SourceType }}: {{ .SourceURL }}
+
+{{ end }}
+{{ if .HasSourceMeta }}
+## Source Metadata
+
+{{ if .SourceTitle }}- Title: {{ .SourceTitle }}
+{{ end }}{{ if .SourceChannel }}- Channel: {{ .SourceChannel }}
+{{ end }}{{ if .SourceDuration }}- Duration: {{ .SourceDuration }}
+{{ end }}{{ if .SourceDesc }}- Description: {{ .SourceDesc }}
+{{ end }}
 
 {{ end }}
 {{ if .HasUserWhy }}
@@ -110,6 +153,11 @@ func Render(s Seed) (string, error) {
 		HasSourceRef:     strings.TrimSpace(s.SourceURL) != "",
 		SourceType:       strings.TrimSpace(s.SourceType),
 		SourceURL:        strings.TrimSpace(s.SourceURL),
+		HasSourceMeta:    hasAnySourceMeta(s),
+		SourceTitle:      strings.TrimSpace(s.SourceTitle),
+		SourceChannel:    strings.TrimSpace(s.SourceChannel),
+		SourceDuration:   formatDurationSeconds(s.SourceDurationSeconds),
+		SourceDesc:       strings.TrimSpace(oneLine(s.SourceDescription)),
 	}
 
 	tmpl, err := template.New("seed").Parse(seedTemplate)

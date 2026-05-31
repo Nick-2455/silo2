@@ -200,6 +200,7 @@ func TestRender_IncludesCallerOwnedSourceSectionBeforeHumanSections(t *testing.T
 		SuggestedThemes:      []string{"unclassified"},
 		SourceType:           "article",
 		SourceURL:            "https://example.com/post",
+		SourceTitle:          "Post title",
 		UserWhy:              "Human reason",
 	}
 
@@ -235,6 +236,36 @@ func TestRender_OmitsCallerOwnedSourceSectionWhenEmpty(t *testing.T) {
 	}
 	if strings.Contains(out, "## Sources") {
 		t.Fatalf("unexpected caller-owned source section:\n%s", out)
+	}
+}
+
+func TestRender_IncludesSourceMetadataSectionWhenPresent(t *testing.T) {
+	s := Seed{
+		ID:                    "seed-1",
+		Title:                 "T",
+		SourceObservationIDs:  []string{"obs-1"},
+		SuggestedThemes:       []string{"unclassified"},
+		SourceType:            "video",
+		SourceURL:             "https://example.com/watch?v=1",
+		SourceTitle:           "Some video",
+		SourceChannel:         "A channel",
+		SourceDurationSeconds: 83,
+	}
+	out, err := Render(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "## Source Metadata") {
+		t.Fatalf("missing Source Metadata section:\n%s", out)
+	}
+	if !strings.Contains(out, "Title: Some video") {
+		t.Fatalf("missing title metadata:\n%s", out)
+	}
+	if !strings.Contains(out, "Channel: A channel") {
+		t.Fatalf("missing channel metadata:\n%s", out)
+	}
+	if !strings.Contains(out, "Duration: 1:23") {
+		t.Fatalf("missing duration metadata:\n%s", out)
 	}
 }
 
