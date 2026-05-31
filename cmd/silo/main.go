@@ -115,12 +115,6 @@ func main() {
 			os.Exit(1)
 		}
 		return
-	case "setup-routine":
-		if err := runSetupRoutine(rest); err != nil {
-			fmt.Fprintln(os.Stderr, "error:", err)
-			os.Exit(1)
-		}
-		return
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", cmd)
 		printHelp(os.Stderr)
@@ -147,7 +141,6 @@ Commands:
   import-wiki  Import legacy wiki/*.md as Inbox/open seeds (experimental)
   import-playlist  Import a YouTube playlist as individual video Seeds
   videos   Generate a global Watch Later list from video Seeds
-  setup-routine  Adaptive interview to build initial weekly routine
   server   Start MCP server over stdio (same as --server)
   help     Print this help
 
