@@ -18,13 +18,6 @@ func NewServer() *server.MCPServer {
 		server.WithToolCapabilities(false),
 	)
 
-	// Schedule tools.
-	s.AddTool(addScheduleEventTool(), handleAddScheduleEvent)
-	s.AddTool(listScheduleEventsTool(), handleListScheduleEvents)
-	s.AddTool(removeScheduleEventTool(), handleRemoveScheduleEvent)
-	s.AddTool(getFreeSlotsTool(), handleGetFreeSlots)
-	s.AddTool(previewScheduleTool(), handlePreviewSchedule)
-
 	// Profile tools.
 	s.AddTool(getProfileContextTool(), handleGetProfileContext)
 	s.AddTool(initProfileTool(), handleInitProfile)

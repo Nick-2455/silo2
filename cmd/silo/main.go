@@ -14,8 +14,8 @@ import (
 	"github.com/nicolasperalta/silo2/internal/config"
 	"github.com/nicolasperalta/silo2/internal/engram"
 	"github.com/nicolasperalta/silo2/internal/identity"
-	siloMCP "github.com/nicolasperalta/silo2/internal/mcp"
 	"github.com/nicolasperalta/silo2/internal/markdown"
+	siloMCP "github.com/nicolasperalta/silo2/internal/mcp"
 	"github.com/nicolasperalta/silo2/internal/obsidian"
 )
 
@@ -137,7 +137,7 @@ Commands:
   outputs  Seed professional outputs (CV / LinkedIn / Bio) under Outputs/
   save     Capture a text observation and propose a Seed under Inbox/open/
   inbox    List seed counts by status and open seed filenames
-  recommend  Suggest what to do next based on profile, seeds, and schedule
+	recommend  Suggest what to do next based on profile, seeds, and free time
   import-wiki  Import legacy wiki/*.md as Inbox/open seeds (experimental)
   import-playlist  Import a YouTube playlist as individual video Seeds
   videos   Generate a global Watch Later list from video Seeds
@@ -474,10 +474,9 @@ func runServer() error {
 	return nil
 }
 
-// runRecommend prints activity suggestions based on profile, seeds, and schedule.
+// runRecommend prints activity suggestions based on profile, seeds, and free time.
 func runRecommend(args []string) error {
 	fs := flag.NewFlagSet("recommend", flag.ContinueOnError)
-	dateFlag := fs.String("date", time.Now().Format("2006-01-02"), "Date in YYYY-MM-DD format")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -503,58 +502,11 @@ func runRecommend(args []string) error {
 	inboxDir := vaultPath + "/Inbox/open"
 	seeds := scanOpenSeedsForCLI(inboxDir)
 
-	// Read schedule and calculate free time for today.
-	schedulePath := cfg.SchedulePath
-	if schedulePath == "" {
-		schedulePath = config.DefaultSchedulePath()
-	}
-	freeMin := 0
-	if schData, err := os.ReadFile(schedulePath); err == nil {
-		var sch struct {
-			Events []struct {
-				Start           string `json:"start"`
-				DurationMinutes int    `json:"duration_minutes"`
-				Days            []string `json:"days"`
-			} `json:"events"`
-		}
-		if jsonErr := json.Unmarshal(schData, &sch); jsonErr == nil {
-			today := *dateFlag
-			// Count minutes occupied by events matching today.
-			for _, ev := range sch.Events {
-				if eventMatchesDate(ev.Days, today) {
-					freeMin += ev.DurationMinutes
-				}
-			}
-		}
-	}
-	// Productive hours total: default 8h = 480 min.
-	freeMin = 480 - freeMin
-	if freeMin < 0 {
-		freeMin = 0
-	}
+	const freeMin = 480
 
 	// Print recommendations.
-	fmt.Println(renderCLIRecommend(*dateFlag, freeMin, profile, seeds))
+	fmt.Println(renderCLIRecommend(time.Now().Format("2006-01-02"), freeMin, profile, seeds))
 	return nil
-}
-
-func eventMatchesDate(days []string, date string) bool {
-	if len(days) == 0 {
-		return true
-	}
-	t, err := time.Parse("2006-01-02", date)
-	if err != nil {
-		return false
-	}
-	dateStr := t.Format("2006-01-02")
-	weekday := strings.ToLower(t.Weekday().String())[:3]
-	for _, d := range days {
-		low := strings.ToLower(strings.TrimSpace(d))
-		if low == dateStr || low == weekday {
-			return true
-		}
-	}
-	return false
 }
 
 func parseProfileFromFile(raw string) siloMCP.ProfileData {
