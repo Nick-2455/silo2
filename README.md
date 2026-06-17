@@ -429,3 +429,21 @@ go run ./cmd/silo outputs
 - [`QUICKSTART.md`](QUICKSTART.md)
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - [`docs/ROADMAP.md`](docs/ROADMAP.md)
+
+## Migration: schedule.json → Apple Calendar
+
+Silo no longer owns time. Your `~/.config/silo2/schedule.json` is obsolete.
+
+### What to do
+1. Open `~/.config/silo2/schedule.json` and review each saved event.
+2. In Apple Calendar.app, create a calendar named exactly `Silo`.
+3. Recreate each `schedule.json` entry in that `Silo` calendar:
+   - `type: routine` with `days: [mon, tue, ...]` becomes a recurring weekly event.
+   - `type: fixed` with `days: [YYYY-MM-DD]` becomes a one-off event.
+4. After you confirm everything is migrated, you may delete `schedule.json` manually.
+
+### Why
+- Silo now expects free-time data to come from Apple Calendar, not a local JSON file.
+- Recommendation logic stays in Silo, while calendar reads and writes move to the calendar layer.
+
+`schedule.json` is left untouched by Silo. The app never deletes it for you.

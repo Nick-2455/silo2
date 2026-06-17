@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -141,6 +142,26 @@ func TestConfig_LoadOmitsTimeoutWhenAbsent(t *testing.T) {
 	}
 	if timeout := got.SynthesisTimeout(); timeout != 5*time.Second {
 		t.Fatalf("SynthesisTimeout() = %v, want 5s", timeout)
+	}
+}
+
+func TestConfig_DoesNotExposeSchedulePath(t *testing.T) {
+	t.Parallel()
+
+	if _, ok := reflect.TypeOf(Config{}).FieldByName("SchedulePath"); ok {
+		t.Fatal("Config must not expose SchedulePath")
+	}
+}
+
+func TestConfig_StillExposesProductiveHours(t *testing.T) {
+	t.Parallel()
+
+	field, ok := reflect.TypeOf(Config{}).FieldByName("ProductiveHours")
+	if !ok {
+		t.Fatal("Config must keep ProductiveHours")
+	}
+	if field.Type != reflect.TypeOf([][2]string{}) {
+		t.Fatalf("ProductiveHours type = %v, want [][2]string", field.Type)
 	}
 }
 
