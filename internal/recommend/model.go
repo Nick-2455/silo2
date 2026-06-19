@@ -14,17 +14,23 @@ type Recommendation struct {
 
 // SeedInput is the minimal representation of an open seed for scoring.
 type SeedInput struct {
-	Title          string
-	Path           string
-	Frontmatter    map[string]string
-	EstimatedMins  int
-	Tags           []string
-	CreatedAt      string // YYYY-MM-DD
+	Title         string
+	Path          string
+	Frontmatter   map[string]string
+	EstimatedMins int
+	Tags          []string
+	CreatedAt     string // YYYY-MM-DD
 }
 
 // Engine produces ranked recommendations from available inputs.
 type Engine interface {
 	Recommend(profile Profile, seeds []SeedInput, freeMinutes int) ([]Recommendation, error)
+	RecommendWithHints(profile Profile, seeds []SeedInput, freeMinutes int, hints Hints) ([]Recommendation, error)
+}
+
+// Hints carries optional recommendation context that can bias scoring.
+type Hints struct {
+	ProductiveHours [][2]string
 }
 
 // Profile holds the user's context for recommendation scoring.

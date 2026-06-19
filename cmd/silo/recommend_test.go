@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -24,34 +25,40 @@ func TestRunRecommend_RejectsRemovedDateFlag(t *testing.T) {
 	}
 }
 
-func TestRunRecommend_UsesFixedFreeMinutesWithoutSchedule(t *testing.T) {
+func TestRunRecommend_UsesFreeMinutesFlagAndPrintsJSON(t *testing.T) {
 	withTempWorkingDir(t)
 
 	vaultDir := t.TempDir()
 	writeRecommendConfig(t, vaultDir)
 	writeRecommendProfile(t, vaultDir)
 	writeRecommendSeed(t, vaultDir, "seed-abc.md", "Focus article")
-	if err := os.WriteFile("schedule.json", []byte(`{"events":[{"duration_minutes":120,"days":["2026-06-01"]}]}`), 0o644); err != nil {
-		t.Fatalf("WriteFile(schedule.json) error = %v", err)
-	}
 
 	output := captureStdout(t, func() {
-		if err := runRecommend(nil); err != nil {
+		if err := runRecommend([]string{"-free-minutes", "120"}); err != nil {
 			t.Fatalf("runRecommend() error = %v", err)
 		}
 	})
 
-	if !strings.Contains(output, "(8:00 libres)") {
-		t.Fatalf("runRecommend() output = %q, want fixed 8 hours free", output)
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &payload); err != nil {
+		t.Fatalf("Unmarshal(output) error = %v; output=%q", err, output)
 	}
-	if !strings.Contains(output, "Focus article") {
-		t.Fatalf("runRecommend() output = %q, want open seed title", output)
+	if payload["free_minutes"] != float64(120) {
+		t.Fatalf("free_minutes = %v, want 120", payload["free_minutes"])
 	}
-	if !strings.Contains(output, "Arquitectura") {
-		t.Fatalf("runRecommend() output = %q, want profile focus", output)
+	if payload["seeds_considered"] != float64(1) {
+		t.Fatalf("seeds_considered = %v, want 1", payload["seeds_considered"])
 	}
-	if !strings.Contains(output, "Recomendaciones") {
-		t.Fatalf("runRecommend() output = %q, want recommendation heading", output)
+	recs, ok := payload["recommendations"].([]any)
+	if !ok || len(recs) != 1 {
+		t.Fatalf("recommendations = %v, want one recommendation", payload["recommendations"])
+	}
+	rec, ok := recs[0].(map[string]any)
+	if !ok {
+		t.Fatalf("recommendation[0] = %T, want object", recs[0])
+	}
+	if rec["title"] != "Focus article" {
+		t.Fatalf("recommendation title = %v, want Focus article", rec["title"])
 	}
 }
 

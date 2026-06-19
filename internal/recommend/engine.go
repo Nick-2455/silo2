@@ -65,6 +65,34 @@ func (e *SimpleEngine) Recommend(profile Profile, seeds []SeedInput, freeMinutes
 	return recs, nil
 }
 
+// RecommendWithHints keeps the base engine deterministic while allowing
+// additive scoring signals to be introduced without changing the original API.
+func (e *SimpleEngine) RecommendWithHints(profile Profile, seeds []SeedInput, freeMinutes int, hints Hints) ([]Recommendation, error) {
+	if len(hints.ProductiveHours) == 0 {
+		return e.Recommend(profile, seeds, freeMinutes)
+	}
+
+	recs, err := e.Recommend(profile, seeds, freeMinutes)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range recs {
+		if recs[i].DurationEstimate > 0 && recs[i].DurationEstimate <= freeMinutes {
+			recs[i].Score++
+		}
+	}
+
+	sort.Slice(recs, func(i, j int) bool {
+		if recs[i].Score == recs[j].Score {
+			return recs[i].Title < recs[j].Title
+		}
+		return recs[i].Score > recs[j].Score
+	})
+
+	return recs, nil
+}
+
 func matchProfile(p Profile, s SeedInput) bool {
 	focus := strings.ToLower(strings.Join(p.CurrentFocus, " "))
 	title := strings.ToLower(s.Title)

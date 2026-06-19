@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/nicolasperalta/silo2/internal/markdown"
 	siloMCP "github.com/nicolasperalta/silo2/internal/mcp"
 	"github.com/nicolasperalta/silo2/internal/obsidian"
+	"github.com/nicolasperalta/silo2/internal/recommend"
 )
 
 func main() {
@@ -477,6 +479,7 @@ func runServer() error {
 // runRecommend prints activity suggestions based on profile, seeds, and free time.
 func runRecommend(args []string) error {
 	fs := flag.NewFlagSet("recommend", flag.ContinueOnError)
+	freeMinutes := fs.Int("free-minutes", 480, "Total free minutes available")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -493,30 +496,47 @@ func runRecommend(args []string) error {
 
 	// Read profile.
 	profilePath := vaultPath + "/Silo/Profile.md"
-	profile := siloMCP.ProfileData{}
+	profile := recommend.Profile{}
 	if data, err := os.ReadFile(profilePath); err == nil {
-		profile = parseProfileFromFile(string(data))
+		profile = recommendProfileFromFile(string(data))
 	}
 
 	// Scan open seeds.
 	inboxDir := vaultPath + "/Inbox/open"
-	seeds := scanOpenSeedsForCLI(inboxDir)
+	seeds := loadCLIRecommendSeeds(inboxDir)
 
-	const freeMin = 480
+	recs, err := recommend.NewEngine().RecommendWithHints(profile, seeds, *freeMinutes, recommend.Hints{
+		ProductiveHours: cfg.ProductiveHours,
+	})
+	if err != nil {
+		return fmt.Errorf("recommend: %w", err)
+	}
 
-	// Print recommendations.
-	fmt.Println(renderCLIRecommend(time.Now().Format("2006-01-02"), freeMin, profile, seeds))
+	payload, err := json.Marshal(map[string]any{
+		"recommendations":  recs,
+		"free_minutes":     *freeMinutes,
+		"seeds_considered": len(seeds),
+	})
+	if err != nil {
+		return fmt.Errorf("marshal recommendations: %w", err)
+	}
+
+	fmt.Println(string(payload))
 	return nil
 }
 
-func parseProfileFromFile(raw string) siloMCP.ProfileData {
+func recommendProfileFromFile(raw string) recommend.Profile {
 	fm := extractFrontmatterFromFile(raw)
 	if fm == "" {
-		return siloMCP.ProfileData{}
+		return recommend.Profile{}
 	}
 	var p siloMCP.ProfileData
 	json.Unmarshal([]byte(fm), &p)
-	return p
+	return recommend.Profile{
+		CurrentFocus:  p.CurrentFocus,
+		Interests:     p.Interests,
+		LearningGoals: p.LearningGoals,
+	}
 }
 
 func extractFrontmatterFromFile(s string) string {
@@ -535,17 +555,12 @@ func extractFrontmatterFromFile(s string) string {
 	return ""
 }
 
-type cliSeed struct {
-	title string
-	path  string
-}
-
-func scanOpenSeedsForCLI(dir string) []cliSeed {
+func loadCLIRecommendSeeds(dir string) []recommend.SeedInput {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
-	var seeds []cliSeed
+	var seeds []recommend.SeedInput
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".md") {
 			continue
@@ -557,46 +572,66 @@ func scanOpenSeedsForCLI(dir string) []cliSeed {
 		if err != nil {
 			continue
 		}
-		title := "(untitled)"
-		for _, line := range strings.Split(string(data), "\n") {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "# ") {
-				title = strings.TrimSpace(trimmed[2:])
-				break
-			}
-		}
-		seeds = append(seeds, cliSeed{title: title, path: "Inbox/open/" + e.Name()})
+		frontmatter := parseCLISeedFrontmatter(string(data))
+		seeds = append(seeds, recommend.SeedInput{
+			Title:         parseCLISeedTitle(string(data)),
+			Path:          "Inbox/open/" + e.Name(),
+			Frontmatter:   frontmatter,
+			EstimatedMins: parseCLISeedEstimatedMinutes(frontmatter["estimated_minutes"]),
+			Tags:          parseCLISeedTags(frontmatter["tags"]),
+		})
 	}
 	return seeds
 }
 
-func renderCLIRecommend(date string, freeMin int, profile siloMCP.ProfileData, seeds []cliSeed) string {
-	var b strings.Builder
-	h := freeMin / 60
-	m := freeMin % 60
-	b.WriteString(fmt.Sprintf("## Recomendaciones para %s (%d:%02d libres)\n\n", date, h, m))
-
-	if len(profile.CurrentFocus) > 0 {
-		b.WriteString("**Foco actual:** ")
-		b.WriteString(strings.Join(profile.CurrentFocus, ", "))
-		b.WriteString("\n\n")
+func parseCLISeedFrontmatter(raw string) map[string]string {
+	fm := extractFrontmatterFromFile(raw)
+	if fm == "" {
+		return nil
 	}
-
-	if len(seeds) == 0 {
-		b.WriteString("*No hay seeds abiertos. Guardá algo nuevo con `silo save`.*\n")
-		return b.String()
-	}
-
-	b.WriteString("### Ver ahora\n\n")
-	for i, s := range seeds {
-		if i >= 5 {
-			b.WriteString(fmt.Sprintf("\n*...y %d más en Inbox/open.*\n", len(seeds)-5))
-			break
+	result := map[string]string{}
+	for _, line := range strings.Split(fm, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
 		}
-		b.WriteString(fmt.Sprintf("- **%s** — `%s`\n", s.title, s.path))
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		result[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
 	}
+	return result
+}
 
-	b.WriteString("\n---\n")
-	b.WriteString("*v1: motor de recomendación simple. Próxima versión usará IA para rankear por prioridad.*\n")
-	return b.String()
+func parseCLISeedTitle(raw string) string {
+	for _, line := range strings.Split(raw, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "# ") {
+			return strings.TrimSpace(trimmed[2:])
+		}
+	}
+	return "(untitled)"
+}
+
+func parseCLISeedTags(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	tags := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if tag := strings.TrimSpace(part); tag != "" {
+			tags = append(tags, tag)
+		}
+	}
+	return tags
+}
+
+func parseCLISeedEstimatedMinutes(raw string) int {
+	minutes, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return 0
+	}
+	return minutes
 }

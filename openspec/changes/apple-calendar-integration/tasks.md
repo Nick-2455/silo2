@@ -106,13 +106,13 @@ Chain strategy: stacked-to-main
 
 ### Phase 2.1 — Add Hints type + RecommendWithHints to engine
 
-- [ ] **2.1** In `internal/recommend/engine.go`: add `Hints` struct (`ProductiveHours [][2]string`) and `RecommendWithHints(profile Profile, seeds []SeedInput, freeMinutes int, hints Hints) ([]Recommendation, error)` method. If `hints.ProductiveHours` is empty, delegate directly to `Recommend()`. Stub scoring bonus is acceptable for this PR (scoring tuning is follow-up).
+- [x] **2.1** In `internal/recommend/engine.go`: add `Hints` struct (`ProductiveHours [][2]string`) and `RecommendWithHints(profile Profile, seeds []SeedInput, freeMinutes int, hints Hints) ([]Recommendation, error)` method. If `hints.ProductiveHours` is empty, delegate directly to `Recommend()`. Stub scoring bonus is acceptable for this PR (scoring tuning is follow-up).
   - _~25 lines added_
   - Verify: `go build ./internal/recommend/...` passes.
 
 ### Phase 2.2 — Refactor handlers_recommend.go
 
-- [ ] **2.2** Rewrite `internal/mcp/handlers_recommend.go`:
+- [x] **2.2** Rewrite `internal/mcp/handlers_recommend.go`:
   - Replace `siloRecommendTool()` definition: remove `date` param, add required `free_slots` array param (array of objects with `start`/`end` strings).
   - Delete `renderRecommendMarkdown()`, `seedSummary`, `scanOpenSeeds()`, `parseSeedTitle()`.
   - Add `FreeSlot` struct (`Start`, `End string`) and `parseFreeSlots(req) ([]FreeSlot, int, error)` function.
@@ -126,14 +126,14 @@ Chain strategy: stacked-to-main
 
 ### Phase 2.3 — Update runRecommend CLI in main.go
 
-- [ ] **2.3** In `cmd/silo/main.go:runRecommend()`: replace `--date` flag with `--free-minutes int` (default 480). Remove `parseProfileFromFile`, `scanOpenSeedsForCLI`, `renderCLIRecommend`, `eventMatchesDate` if they are only used by `runRecommend` (verify scope before deleting). Load profile + seeds from vault, call `recommend.NewEngine().RecommendWithHints(...)` with the flag value, print JSON output.
+- [x] **2.3** In `cmd/silo/main.go:runRecommend()`: replace `--date` flag with `--free-minutes int` (default 480). Remove `parseProfileFromFile`, `scanOpenSeedsForCLI`, `renderCLIRecommend`, `eventMatchesDate` if they are only used by `runRecommend` (verify scope before deleting). Load profile + seeds from vault, call `recommend.NewEngine().RecommendWithHints(...)` with the flag value, print JSON output.
   - _~60 lines deleted, ~20 lines added_
   - _Depends on: 2.2_
   - Verify: `go build ./cmd/silo/...` passes. `go run ./cmd/silo recommend --free-minutes 120` prints JSON without error.
 
 ### Phase 2.4 — Unit tests for handler (happy path + all error cases)
 
-- [ ] **2.4** Create `internal/mcp/handlers_recommend_test.go`:
+- [x] **2.4** Create `internal/mcp/handlers_recommend_test.go`:
   - Test: valid `free_slots` → returns `recommendations` array, `free_minutes`, `seeds_considered`.
   - Test: missing `free_slots` → tool result error `"free_slots is required"`.
   - Test: empty `free_slots: []` → tool result error `"no free time available"`.
@@ -146,7 +146,7 @@ Chain strategy: stacked-to-main
 
 ### Phase 2.5 — Unit test for RecommendWithHints
 
-- [ ] **2.5** In `internal/recommend/engine_test.go`: add tests for `RecommendWithHints`:
+- [x] **2.5** In `internal/recommend/engine_test.go`: add tests for `RecommendWithHints`:
   - Test: empty `Hints` → output identical to `Recommend()` for same inputs.
   - Test: same inputs called twice → identical output (determinism).
   - Test: non-empty `ProductiveHours` → compiles + runs without panic (scoring tuning is follow-up, not tested in depth here).
@@ -156,16 +156,16 @@ Chain strategy: stacked-to-main
 
 ### Phase 2.6 — Full build + test verification
 
-- [ ] **2.6** Run `go build ./...` — must pass.
-- [ ] **2.6b** Run `go test ./...` — must pass, including new handler tests.
-- [ ] **2.6c** Verify determinism: run `go test ./internal/mcp/... -run TestSiloRecommendDeterminism` (if named so) passes.
+- [x] **2.6** Run `go build ./...` — must pass.
+- [x] **2.6b** Run `go test ./...` — must pass, including new handler tests.
+- [x] **2.6c** Verify determinism: run `go test ./internal/mcp/... -run TestSiloRecommendDeterminism` (if named so) passes.
 
 **PR 2 done when**:
-- [ ] `go build ./...` green
-- [ ] `go test ./...` green (including `handlers_recommend_test.go` and `engine_test.go` additions)
-- [ ] `silo_recommend` in `server.go` uses `free_slots` array param (verify tool definition)
-- [ ] No references to `renderRecommendMarkdown`, `scanOpenSeeds`, `parseSeedTitle` remain in codebase
-- [ ] `silo recommend --free-minutes 120` runs without error
+- [x] `go build ./...` green
+- [x] `go test ./...` green (including `handlers_recommend_test.go` and `engine_test.go` additions)
+- [x] `silo_recommend` in `server.go` uses `free_slots` array param (verify tool definition)
+- [x] No references to `renderRecommendMarkdown`, `scanOpenSeeds`, `parseSeedTitle` remain in codebase
+- [x] `silo recommend --free-minutes 120` runs without error
 
 ---
 

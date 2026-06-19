@@ -1,6 +1,7 @@
 package recommend
 
 import (
+	"reflect"
 	"testing"
 )
 
@@ -90,6 +91,71 @@ func TestSimpleEngine_TopFive(t *testing.T) {
 	}
 	if len(recs) != 5 {
 		t.Fatalf("expected 5 (top 5), got %d", len(recs))
+	}
+}
+
+func TestSimpleEngine_RecommendWithHints_MatchesRecommendWhenHintsEmpty(t *testing.T) {
+	t.Parallel()
+
+	e := NewEngine()
+	profile := Profile{CurrentFocus: []string{"Go", "Architecture"}}
+	seeds := []SeedInput{
+		{Title: "Go architecture deep dive", EstimatedMins: 30, Tags: []string{"go", "architecture"}},
+		{Title: "Gardening basics", EstimatedMins: 15, Tags: []string{"garden"}},
+	}
+
+	base, err := e.Recommend(profile, seeds, 60)
+	if err != nil {
+		t.Fatalf("Recommend() error = %v", err)
+	}
+
+	withHints, err := e.RecommendWithHints(profile, seeds, 60, Hints{})
+	if err != nil {
+		t.Fatalf("RecommendWithHints() error = %v", err)
+	}
+
+	if !reflect.DeepEqual(withHints, base) {
+		t.Fatalf("RecommendWithHints() = %#v, want %#v", withHints, base)
+	}
+}
+
+func TestSimpleEngine_RecommendWithHints_IsDeterministic(t *testing.T) {
+	t.Parallel()
+
+	e := NewEngine()
+	profile := Profile{CurrentFocus: []string{"Go"}}
+	seeds := []SeedInput{
+		{Title: "Go testing patterns", EstimatedMins: 25, Tags: []string{"go", "testing"}},
+		{Title: "System design", EstimatedMins: 45, Tags: []string{"architecture"}},
+	}
+	hints := Hints{ProductiveHours: [][2]string{{"08:00", "12:00"}}}
+
+	first, err := e.RecommendWithHints(profile, seeds, 90, hints)
+	if err != nil {
+		t.Fatalf("first RecommendWithHints() error = %v", err)
+	}
+	second, err := e.RecommendWithHints(profile, seeds, 90, hints)
+	if err != nil {
+		t.Fatalf("second RecommendWithHints() error = %v", err)
+	}
+
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("RecommendWithHints() first = %#v, second = %#v", first, second)
+	}
+}
+
+func TestSimpleEngine_RecommendWithHints_AcceptsProductiveHours(t *testing.T) {
+	t.Parallel()
+
+	e := NewEngine()
+	_, err := e.RecommendWithHints(
+		Profile{CurrentFocus: []string{"Go"}},
+		[]SeedInput{{Title: "Go testing", EstimatedMins: 20, Tags: []string{"go"}}},
+		60,
+		Hints{ProductiveHours: [][2]string{{"08:00", "12:00"}, {"14:00", "18:00"}}},
+	)
+	if err != nil {
+		t.Fatalf("RecommendWithHints() error = %v", err)
 	}
 }
 
