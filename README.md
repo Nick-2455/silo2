@@ -447,3 +447,35 @@ Silo no longer owns time. Your `~/.config/silo2/schedule.json` is obsolete.
 - Recommendation logic stays in Silo, while calendar reads and writes move to the calendar layer.
 
 `schedule.json` is left untouched by Silo. The app never deletes it for you.
+
+## Skills Install
+
+Two agent skills ship with this repo. Copy them to your opencode skills directory so opencode discovers them automatically.
+
+```bash
+cp skills/silo-guide/SKILL.md ~/.config/opencode/skills/silo-guide/SKILL.md
+cp skills/silo-calendar-guard/SKILL.md ~/.config/opencode/skills/silo-calendar-guard/SKILL.md
+```
+
+### `silo-guide`
+
+Orchestrates Silo MCP + Apple Calendar MCP to derive free time and present ranked activity recommendations. Triggers on: session start, "qué hago", "plan", "recommend", "schedule", "focus".
+
+### `silo-calendar-guard`
+
+Enforces containment rules for Apple Calendar writes: only the `Silo` calendar may be written to, and every write requires explicit user confirmation. Triggers on: "add to calendar", "schedule this", "block time", "delete event", "move event".
+
+### Prerequisites
+
+Both skills depend on the **FradSer Apple Calendar MCP** (`mcp-server-apple-events`) being available in your opencode environment.
+
+**Install FradSer locally (do not use `npx -y`):**
+
+1. Clone the repository and build the binary locally:
+   ```bash
+   git clone https://github.com/FradSer/mcp-server-apple-events
+   cd mcp-server-apple-events
+   npm install && npm run build
+   ```
+2. Pin the version you built — do not rely on `npx -y` to pull a remote version at runtime. Record the commit hash or release tag for reproducibility.
+3. Register the built binary in your opencode MCP config (e.g. `~/.config/opencode/mcp.json`) pointing to the local binary path.
